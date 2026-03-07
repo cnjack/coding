@@ -25,6 +25,16 @@ type SSHAlias struct {
 	Path string `json:"path,omitempty"` // remote working directory
 }
 
+// MCPServer represents a configured MCP server connection
+type MCPServer struct {
+	Type    string            `json:"type,omitempty"`
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Env     []string          `json:"env,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
 // Config represents the application configuration
 type Config struct {
 	Models        map[string]*ProviderConfig `json:"models"`
@@ -32,6 +42,7 @@ type Config struct {
 	Model         string                     `json:"model"`
 	MaxIterations int                        `json:"max_iterations,omitempty"`
 	SSHAliases    []SSHAlias                 `json:"ssh_aliases,omitempty"`
+	MCPServers    map[string]*MCPServer      `json:"mcp_servers,omitempty"`
 }
 
 // configFilePath returns the full path to the config file

@@ -102,6 +102,17 @@ type ConfigUpdatedMsg struct {
 	Message  string
 }
 
+type MCPStatusItem struct {
+	Name      string
+	ToolCount int
+	Running   bool
+	ErrMsg    string
+}
+
+type MCPStatusMsg struct {
+	Statuses []MCPStatusItem
+}
+
 // --- Model ---
 
 type Mode int
@@ -130,6 +141,7 @@ type Model struct {
 	mdRenderer  *glamour.TermRenderer
 	pendingTool string
 	textarea    textarea.Model
+	mcpStatuses []MCPStatusItem
 
 	// SSH setup wizard state
 	sshStep int        // 0=none, 1=waiting for host, 2=waiting for response, 3=picking dir
@@ -161,6 +173,7 @@ type Model struct {
 	// Active configuration state
 	activeProvider string
 	activeModel    string
+	textareaLines  int
 }
 
 // dirItem implements list.Item
@@ -275,6 +288,7 @@ func NewModel(hasPrompt bool) Model {
 		thinking:       thinking,
 		mdRenderer:     md,
 		textarea:       newTextarea(),
+		textareaLines:  1,
 		currentText:    &strings.Builder{},
 		dirList:        l,
 		modelPicker:    ml,
@@ -283,7 +297,7 @@ func NewModel(hasPrompt bool) Model {
 		history:        loadHistory(),
 	}
 	m.historyIndex = len(m.history)
-	
+
 	if cfg, err := config.LoadConfig(); err == nil {
 		m.activeProvider = cfg.Provider
 		m.activeModel = cfg.Model
@@ -513,6 +527,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.historyIndex = len(m.history)
 
 					m.textarea.Reset()
+					m.textareaLines = 1
+					m.textarea.SetHeight(1)
 
 					if prompt == "/setting" {
 						return m.handleSettingInput(cmds)
@@ -558,12 +574,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				var cmd tea.Cmd
 				m.textarea, cmd = m.textarea.Update(tea.KeyMsg{Type: tea.KeyEnter})
 				cmds = append(cmds, cmd)
+				m.textareaLines = recalcLines(m.textarea.Value())
+				m.textarea.SetHeight(m.textareaLines)
+				if m.ready {
+					m.viewport.Height = m.calcViewportHeight(m.inputActive())
+				}
 				return m, tea.Batch(cmds...)
 			case "up":
 				if m.historyIndex > 0 {
 					m.historyIndex--
 					m.textarea.SetValue(m.history[m.historyIndex])
 					m.textarea.CursorEnd()
+					m.textareaLines = recalcLines(m.textarea.Value())
+					m.textarea.SetHeight(m.textareaLines)
+					if m.ready {
+						m.viewport.Height = m.calcViewportHeight(m.inputActive())
+					}
 				}
 				return m, tea.Batch(cmds...)
 			case "down":
@@ -574,6 +600,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else if m.historyIndex == len(m.history)-1 {
 					m.historyIndex++
 					m.textarea.SetValue("")
+				}
+				m.textareaLines = recalcLines(m.textarea.Value())
+				m.textarea.SetHeight(m.textareaLines)
+				if m.ready {
+					m.viewport.Height = m.calcViewportHeight(m.inputActive())
 				}
 				return m, tea.Batch(cmds...)
 			case "pgup", "pgdown":
@@ -588,6 +619,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.textarea, cmd = m.textarea.Update(msg)
 			cmds = append(cmds, cmd)
+			m.textareaLines = recalcLines(m.textarea.Value())
+			m.textarea.SetHeight(m.textareaLines)
+			if m.ready {
+				m.viewport.Height = m.calcViewportHeight(m.inputActive())
+			}
 			return m, tea.Batch(cmds...)
 		}
 		// Agent running — only ctrl+c
@@ -648,6 +684,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case MCPStatusMsg:
+		m.mcpStatuses = msg.Statuses
+		m.refreshViewport()
+
 	case AddModelMsg:
 		select {
 		case addModelCh <- struct{}{}:
@@ -665,7 +705,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sshStep = 3
 			m.sshPath = msg.Path
 			m.dirList.Title = fmt.Sprintf("Dir: %s", msg.Path)
-			
+
 			// Build list items: .. first, then subdirs, then ✅ at the bottom
 			var items []list.Item
 			for _, name := range msg.Items {
@@ -796,13 +836,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-const inputAreaLines = 4 // divider + textarea(1) + divider + padding
+const maxTextareaLines = 5
+
+func recalcLines(s string) int {
+	n := strings.Count(s, "\n") + 1
+	if n < 1 {
+		n = 1
+	}
+	if n > maxTextareaLines {
+		n = maxTextareaLines
+	}
+	return n
+}
+
+func (m Model) inputAreaHeight() int {
+	lines := m.textareaLines
+	if lines < 1 {
+		lines = 1
+	}
+	return lines + 3 // divider + textarea + divider + statusline
+}
 
 func (m Model) calcViewportHeight(withInput bool) int {
 	headerHeight := 3
 	footerHeight := 2
 	if withInput {
-		footerHeight = inputAreaLines + 1
+		footerHeight = m.inputAreaHeight() + 1
 	}
 	h := m.height - headerHeight - footerHeight
 	if h < 3 {
@@ -857,11 +916,17 @@ func (m Model) View() string {
 
 func (m Model) settingMenuView() string {
 	w, h := m.width, m.height
-	if w <= 0 { w = 80 }
-	if h <= 0 { h = 24 }
+	if w <= 0 {
+		w = 80
+	}
+	if h <= 0 {
+		h = 24
+	}
 
 	modW, modH := w-8, h-4
-	if modW > 120 { modW = 120 }
+	if modW > 120 {
+		modW = 120
+	}
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -888,11 +953,17 @@ func (m Model) settingMenuView() string {
 
 func (m Model) sshAliasPickerView() string {
 	w, h := m.width, m.height
-	if w <= 0 { w = 80 }
-	if h <= 0 { h = 24 }
+	if w <= 0 {
+		w = 80
+	}
+	if h <= 0 {
+		h = 24
+	}
 
 	modW, modH := w-8, h-4
-	if modW > 120 { modW = 120 }
+	if modW > 120 {
+		modW = 120
+	}
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -919,11 +990,17 @@ func (m Model) sshAliasPickerView() string {
 
 func (m Model) modelPickerView() string {
 	w, h := m.width, m.height
-	if w <= 0 { w = 80 }
-	if h <= 0 { h = 24 }
+	if w <= 0 {
+		w = 80
+	}
+	if h <= 0 {
+		h = 24
+	}
 
 	modW, modH := w-8, h-4
-	if modW > 120 { modW = 120 }
+	if modW > 120 {
+		modW = 120
+	}
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -933,7 +1010,7 @@ func (m Model) modelPickerView() string {
 		Height(modH)
 
 	headerText := fmt.Sprintf(" %s ", toolNameStyle.Render("Select Model"))
-	
+
 	m.modelPicker.SetSize(modW-6, modH-8)
 	m.modelPicker.Title = "Select model (↑/↓ to navigate, Enter to confirm, Esc to cancel)"
 	m.modelPicker.SetShowHelp(false)
@@ -950,11 +1027,17 @@ func (m Model) modelPickerView() string {
 
 func (m Model) dirPickerView() string {
 	w, h := m.width, m.height
-	if w <= 0 { w = 80 }
-	if h <= 0 { h = 24 }
+	if w <= 0 {
+		w = 80
+	}
+	if h <= 0 {
+		h = 24
+	}
 
 	modW, modH := w-8, h-4
-	if modW > 120 { modW = 120 }
+	if modW > 120 {
+		modW = 120
+	}
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -964,7 +1047,7 @@ func (m Model) dirPickerView() string {
 		Height(modH)
 
 	headerText := fmt.Sprintf(" Open Folder: %s ", toolNameStyle.Render(m.sshAddr))
-	
+
 	pathBox := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(colorSecondary).
@@ -1003,18 +1086,39 @@ func (m Model) inputAreaView() string {
 	}
 
 	parts = append(parts, lipgloss.NewStyle().PaddingLeft(1).PaddingRight(2).Render(m.textarea.View()))
-
-	// Status bar at the bottom showing current provider/model
-	statusTxt := "Model: "
-	if m.activeProvider != "" {
-		statusTxt += m.activeProvider + " / " + m.activeModel
-	} else {
-		statusTxt += "Not configured"
-	}
-	statusStyle := lipgloss.NewStyle().Foreground(colorMuted).PaddingLeft(2).PaddingBottom(1)
-	
 	parts = append(parts, divider(m.width))
-	parts = append(parts, statusStyle.Render(statusTxt))
+
+	// Single status line: model on left, MCP tools on right
+	leftTxt := "  Model: "
+	if m.activeProvider != "" {
+		leftTxt += m.activeProvider + " / " + m.activeModel
+	} else {
+		leftTxt += "Not configured"
+	}
+
+	rightTxt := ""
+	if len(m.mcpStatuses) > 0 {
+		activeServers := 0
+		loadedTools := 0
+		for _, st := range m.mcpStatuses {
+			if st.Running {
+				activeServers++
+				loadedTools += st.ToolCount
+			}
+		}
+		rightTxt = fmt.Sprintf("MCP: %d active / %d tools  ", activeServers, loadedTools)
+	}
+
+	statusStyle := lipgloss.NewStyle().Foreground(colorMuted)
+	leftW := lipgloss.Width(leftTxt)
+	rightW := lipgloss.Width(rightTxt)
+	space := m.width - leftW - rightW
+	if space < 1 {
+		space = 1
+	}
+	statusLine := leftTxt + strings.Repeat(" ", space) + rightTxt
+	parts = append(parts, statusStyle.Render(statusLine))
+
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 

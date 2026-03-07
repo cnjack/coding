@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"strings"
@@ -32,9 +33,19 @@ func main() {
 	var prompt string
 	flag.StringVar(&prompt, "prompt", "", "The prompt to send to the coding assistant")
 	flag.StringVar(&prompt, "p", "", "The prompt to send to the coding assistant (shorthand)")
+	var isDoctor bool
+	flag.BoolVar(&isDoctor, "doctor", false, "Run system check to test model and MCP connections")
 	flag.Parse()
 	prompt = strings.TrimSpace(prompt)
 	hasPrompt := prompt != ""
+
+	if isDoctor {
+		runDoctorMode()
+		return
+	}
+
+	// Disable default log output to prevent background libraries from corrupting TUI
+	log.SetOutput(io.Discard)
 
 	// Setup wizard if config is missing
 	if config.NeedsSetup() {
@@ -80,6 +91,27 @@ func main() {
 		env.NewExecuteTool(), env.NewGrepTool(),
 	}
 
+	var mcpStatuses []tui.MCPStatusItem
+	if len(cfg.MCPServers) > 0 {
+		var mcpTools []tool.BaseTool
+		var internalStatuses []tools.MCPStatus
+		mcpTools, internalStatuses = tools.LoadMCPTools(ctx, cfg.MCPServers)
+		toolList = append(toolList, mcpTools...)
+
+		for _, st := range internalStatuses {
+			errMsg := ""
+			if st.Error != nil {
+				errMsg = st.Error.Error()
+			}
+			mcpStatuses = append(mcpStatuses, tui.MCPStatusItem{
+				Name:      st.Name,
+				ToolCount: st.ToolCount,
+				Running:   st.Running,
+				ErrMsg:    errMsg,
+			})
+		}
+	}
+
 	ag, err := agent.NewAgent(ctx, chatModel, toolList, systemPrompt)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating agent: %v\n", err)
@@ -89,6 +121,9 @@ func main() {
 	p, _ := tui.RunTUI(hasPrompt)
 
 	go func() {
+		if len(mcpStatuses) > 0 {
+			p.Send(tui.MCPStatusMsg{Statuses: mcpStatuses})
+		}
 		var history []adk.Message
 
 		if hasPrompt {
@@ -265,7 +300,7 @@ func handleSSHListDir(ctx context.Context, env *tools.Env, path string, p *tea.P
 
 	// Check if parent directory should be added (if not root)
 	if path != "/" {
-		// Just a heuristic, actual parent logic can be handled client side 
+		// Just a heuristic, actual parent logic can be handled client side
 		// but providing ".." gives user an easy way back.
 		dirs = append(dirs, "..")
 	}
@@ -416,4 +451,57 @@ func runAgent(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.Messag
 
 	p.Send(tui.AgentDoneMsg{})
 	return assistantText.String()
+}
+
+func runDoctorMode() {
+	fmt.Println("🚀 Running system check (Doctor Mode)...")
+	fmt.Println("----------------------------------------")
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		fmt.Printf("✗ Config load failed: %v\n", err)
+		return
+	}
+
+	fmt.Printf("✓ Config loaded from: %s\n", config.ConfigPath())
+	fmt.Printf("✓ Active Model: %s / %s\n", cfg.Provider, cfg.Model)
+
+	providerCfg := cfg.Models[cfg.Provider]
+	if providerCfg == nil {
+		fmt.Printf("✗ Provider %q not found in config\n", cfg.Provider)
+		return
+	}
+
+	fmt.Println("\n[1] Testing Model Connection...")
+	chatModel, err := internalmodel.NewChatModel(context.Background(), &internalmodel.ChatModelConfig{
+		Model: cfg.Model, APIKey: providerCfg.APIKey, BaseURL: providerCfg.BaseURL,
+	})
+	if err != nil {
+		fmt.Printf("  ✗ Failed to initialize model: %v\n", err)
+	} else {
+		// Try a basic completion
+		msg := schema.UserMessage("hi")
+		_, err := chatModel.Generate(context.Background(), []*schema.Message{msg})
+		if err != nil {
+			fmt.Printf("  ✗ Model generate error: %v\n", err)
+		} else {
+			fmt.Printf("  ✅ Model connection successful! (%s)\n", cfg.Model)
+		}
+	}
+
+	fmt.Println("\n[2] Testing MCP Servers...")
+	if len(cfg.MCPServers) == 0 {
+		fmt.Println("  ℹ No MCP servers configured.")
+	} else {
+		_, statuses := tools.LoadMCPTools(context.Background(), cfg.MCPServers)
+		for _, st := range statuses {
+			if st.Running {
+				fmt.Printf("  ✅ Server: %s (Running, %d tools loaded)\n", st.Name, st.ToolCount)
+			} else {
+				fmt.Printf("  ❌ Server: %s (Failed: %v)\n", st.Name, st.Error)
+			}
+		}
+	}
+
+	fmt.Println("\n✨ Doctor check complete.")
 }

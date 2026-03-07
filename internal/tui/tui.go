@@ -1215,7 +1215,7 @@ func (m Model) handleSSHStep(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) 
 // startSSHConnect sends the connect message and updates the UI.
 func (m Model) startSSHConnect(addr, path string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	m.sshStep = 0
-	m.sshAddr = ""
+	m.sshAddr = addr
 	m.mode = ModeAgent
 	m.agentDone = false
 	m.thinking = true

@@ -18,6 +18,8 @@ Date: {{ .Date }}
 - **write**: Write full content to a file (create or overwrite)
 - **execute**: Run bash commands with timeout
 - **grep**: Search for patterns across files with regex support and file-type filtering
+- **todowrite**: Manage a structured todo list to track multi-step tasks. Send the full list of items each time with id, title, and status (pending/in_progress/completed/cancelled). Use for complex tasks with 3+ steps.
+- **todoread**: Read the current todo list. Use frequently to stay on track.
 
 # Workflow
 1. Explore: read files, understand the context

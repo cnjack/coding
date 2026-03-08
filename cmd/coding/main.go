@@ -122,6 +122,7 @@ func main() {
 	toolList := []tool.BaseTool{
 		env.NewReadTool(), env.NewEditTool(), env.NewWriteTool(),
 		env.NewExecuteTool(), env.NewGrepTool(),
+		env.NewTodoWriteTool(), env.NewTodoReadTool(),
 	}
 
 	var mcpStatuses []tui.MCPStatusItem
@@ -145,7 +146,13 @@ func main() {
 		}
 	}
 
-	ag, err := agent.NewAgent(ctx, chatModel, toolList, systemPrompt)
+	// createAgent is a helper that builds the agent with the current config.
+	// All call sites use this to avoid duplication.
+	createAgent := func() (*adk.ChatModelAgent, error) {
+		return agent.NewAgent(ctx, chatModel, toolList, systemPrompt)
+	}
+
+	ag, err := createAgent()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating agent: %v\n", err)
 		os.Exit(1)
@@ -167,7 +174,7 @@ func main() {
 		hasPrompt = false // treat as interactive, not one-shot
 	}
 
-	p, _ := tui.RunTUI(hasPrompt, pwd)
+	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore)
 
 	go func() {
 		// Create a session recorder for this run (best-effort).
@@ -200,7 +207,7 @@ func main() {
 				rec.RecordUser(prompt)
 			}
 			history = append(history, schema.UserMessage(prompt))
-			resp := runAgent(ctx, ag, history, p, rec)
+			resp := runAgent(ctx, ag, history, p, rec, env.TodoStore)
 			if resp != "" {
 				history = append(history, &schema.Message{Role: schema.Assistant, Content: resp})
 			}
@@ -222,8 +229,7 @@ func main() {
 					})
 					if err == nil {
 						chatModel = newChatModel
-						newAg, err := agent.NewAgent(ctx, chatModel, toolList, systemPrompt)
-						if err == nil {
+						if newAg, err := createAgent(); err == nil {
 							ag = newAg
 						}
 					}
@@ -233,7 +239,7 @@ func main() {
 					rec.RecordUser(userPrompt)
 				}
 				history = append(history, schema.UserMessage(userPrompt))
-				resp := runAgent(ctx, ag, history, p, rec)
+				resp := runAgent(ctx, ag, history, p, rec, env.TodoStore)
 				if resp != "" {
 					history = append(history, &schema.Message{Role: schema.Assistant, Content: resp})
 				}
@@ -250,7 +256,7 @@ func main() {
 			case connMsg := <-sshCh:
 				switch msg := connMsg.(type) {
 				case tui.SSHConnectMsg:
-					handleSSHConnect(ctx, env, msg.Addr, msg.Path, p, &systemPrompt, &ag, chatModel, toolList)
+					handleSSHConnect(ctx, env, msg.Addr, msg.Path, p, &systemPrompt, &ag, chatModel, createAgent)
 				case tui.SSHListDirReqMsg:
 					handleSSHListDir(ctx, env, msg.Path, p)
 				case tui.SSHCancelMsg:
@@ -258,7 +264,7 @@ func main() {
 					// Restore env to local
 					env.ResetToLocal(pwd, platform)
 					systemPrompt = prompts.GetSystemPrompt(platform, pwd)
-					if newAg, err := agent.NewAgent(ctx, chatModel, toolList, systemPrompt); err == nil {
+					if newAg, err := createAgent(); err == nil {
 						ag = newAg
 					}
 				}
@@ -281,8 +287,7 @@ func main() {
 							})
 							if cmErr == nil {
 								chatModel = newChatModel
-								newAg, agErr := agent.NewAgent(ctx, chatModel, toolList, systemPrompt)
-								if agErr == nil {
+								if newAg, agErr := createAgent(); agErr == nil {
 									ag = newAg
 								}
 							}
@@ -307,7 +312,7 @@ func main() {
 // handleSSHConnect connects to a remote machine via SSH and reconfigures the env.
 func handleSSHConnect(ctx context.Context, env *tools.Env, addr, path string, p *tea.Program,
 	systemPrompt *string, ag **adk.ChatModelAgent,
-	chatModel einomodel.ToolCallingChatModel, toolList []tool.BaseTool) {
+	chatModel einomodel.ToolCallingChatModel, createAgent func() (*adk.ChatModelAgent, error)) {
 
 	// Parse user@host
 	user := "root"
@@ -359,7 +364,7 @@ func handleSSHConnect(ctx context.Context, env *tools.Env, addr, path string, p 
 	*systemPrompt = prompts.GetSystemPrompt(executor.Platform(), remotePwd)
 
 	// Rebuild agent with new system prompt
-	newAg, agErr := agent.NewAgent(ctx, chatModel, toolList, *systemPrompt)
+	newAg, agErr := createAgent()
 	if agErr == nil {
 		*ag = newAg
 	}
@@ -444,7 +449,29 @@ func buildSSHAuthMethods() []ssh.AuthMethod {
 	return methods
 }
 
-func runAgent(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.Message, p *tea.Program, rec *session.Recorder) string {
+func runAgent(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.Message, p *tea.Program, rec *session.Recorder, todoStore *tools.TodoStore) string {
+	resp := runAgentInner(ctx, ag, messages, p, rec, todoStore)
+
+	// Completion guard: if the agent finished but there are still incomplete todos,
+	// re-run with a reminder so nothing is left behind.
+	const maxGuardRetries = 3
+	for i := 0; i < maxGuardRetries; i++ {
+		if todoStore == nil || !todoStore.HasIncomplete() {
+			break
+		}
+		reminder := todoStore.IncompleteSummary()
+		p.Send(tui.AgentTextMsg{Text: "\n⚠️ Incomplete todos detected, continuing...\n"})
+		messages = append(messages, &schema.Message{Role: schema.Assistant, Content: resp})
+		messages = append(messages, schema.UserMessage(reminder))
+		extra := runAgentInner(ctx, ag, messages, p, rec, todoStore)
+		resp += extra
+	}
+
+	p.Send(tui.AgentDoneMsg{})
+	return resp
+}
+
+func runAgentInner(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.Message, p *tea.Program, rec *session.Recorder, todoStore *tools.TodoStore) string {
 	input := &adk.AgentInput{
 		Messages:        messages,
 		EnableStreaming: true,
@@ -473,6 +500,9 @@ func runAgent(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.Messag
 			if !mo.IsStreaming && mo.Message != nil {
 				output := mo.Message.Content
 				p.Send(tui.ToolResultMsg{Name: toolName, Output: output})
+				if toolName == "todowrite" || toolName == "todoread" {
+					p.Send(tui.TodoUpdateMsg{})
+				}
 				if rec != nil {
 					rec.RecordToolResult(toolName, output, nil)
 				}
@@ -495,6 +525,9 @@ func runAgent(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.Messag
 				}
 				if toolErr == nil {
 					p.Send(tui.ToolResultMsg{Name: toolName, Output: sb.String()})
+					if toolName == "todowrite" || toolName == "todoread" {
+						p.Send(tui.TodoUpdateMsg{})
+					}
 					if rec != nil {
 						rec.RecordToolResult(toolName, sb.String(), nil)
 					}
@@ -557,7 +590,6 @@ func runAgent(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.Messag
 		rec.RecordAssistant(assistantText.String())
 	}
 
-	p.Send(tui.AgentDoneMsg{})
 	return assistantText.String()
 }
 

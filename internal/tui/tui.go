@@ -17,6 +17,7 @@ import (
 
 	"github.com/cnjack/coding/internal/config"
 	"github.com/cnjack/coding/internal/session"
+	"github.com/cnjack/coding/internal/tools"
 )
 
 const maxToolOutputLen = 500
@@ -72,6 +73,9 @@ type ToolResultMsg struct {
 type AgentDoneMsg struct{ Err error }
 type PromptSubmitMsg struct{ Prompt string }
 type UserPromptMsg struct{ Prompt string }
+
+// TodoUpdateMsg signals that the todo store has been updated.
+type TodoUpdateMsg struct{}
 
 // AddModelMsg signals that the user wants to add a new model via setup wizard
 type AddModelMsg struct{}
@@ -218,6 +222,9 @@ type Model struct {
 	activeProvider string
 	activeModel    string
 	textareaLines  int
+
+	// Todo store
+	todoStore *tools.TodoStore
 }
 
 // dirItem implements list.Item
@@ -296,7 +303,7 @@ func newTextarea() textarea.Model {
 	return ta
 }
 
-func NewModel(hasPrompt bool, pwd string) Model {
+func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = spinnerStyle
@@ -363,6 +370,7 @@ func NewModel(hasPrompt bool, pwd string) Model {
 		sessionPicker:  sesl,
 		pwd:            pwd,
 		history:        loadHistory(),
+		todoStore:      todoStore,
 	}
 	m.historyIndex = len(m.history)
 
@@ -794,6 +802,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mcpStatuses = msg.Statuses
 		m.refreshViewport()
 
+	case TodoUpdateMsg:
+		m.refreshViewport()
+
 	case AddModelMsg:
 		select {
 		case addModelCh <- struct{}{}:
@@ -1019,7 +1030,11 @@ func (m Model) inputAreaHeight() int {
 	if lines < 1 {
 		lines = 1
 	}
-	return lines + 3 // divider + textarea + divider + statusline
+	h := lines + 3 // divider + textarea + divider + statusline
+	if m.todoStore != nil && m.todoStore.HasItems() {
+		h += m.todoBarHeight()
+	}
+	return h
 }
 
 func (m Model) calcViewportHeight(withInput bool) int {
@@ -1240,8 +1255,83 @@ func (m Model) dirPickerView() string {
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
 }
 
+// todoBarHeight returns the number of lines the todo bar occupies.
+func (m Model) todoBarHeight() int {
+	if m.todoStore == nil || !m.todoStore.HasItems() {
+		return 0
+	}
+	items := m.todoStore.Items()
+	// Count: label line + item lines (max 5 visible)
+	n := len(items)
+	if n > 5 {
+		n = 5
+	}
+	return 1 + n // header + items
+}
+
+// renderTodoBar renders the todo items as a compact block above the input.
+func (m Model) renderTodoBar() string {
+	if m.todoStore == nil {
+		return ""
+	}
+	items := m.todoStore.Items()
+	if len(items) == 0 {
+		return ""
+	}
+
+	var completed, total int
+	total = len(items)
+	for _, item := range items {
+		if item.Status == tools.TodoCompleted {
+			completed++
+		}
+	}
+
+	header := todoLabelStyle.Render(fmt.Sprintf("📋 Todo (%d/%d)", completed, total))
+
+	var lines []string
+	lines = append(lines, "  "+header)
+
+	shown := items
+	if len(shown) > 5 {
+		shown = shown[:5]
+	}
+	for _, item := range shown {
+		var icon, text string
+		switch item.Status {
+		case tools.TodoCompleted:
+			icon = todoCompletedStyle.Render("✓")
+			text = todoCompletedStyle.Render(item.Title)
+		case tools.TodoInProgress:
+			icon = todoInProgressStyle.Render("⏳")
+			text = todoInProgressStyle.Render(item.Title)
+		case tools.TodoCancelled:
+			icon = todoCancelledStyle.Render("✗")
+			text = todoCancelledStyle.Render(item.Title)
+		default: // pending
+			icon = todoPendingStyle.Render("○")
+			text = todoPendingStyle.Render(item.Title)
+		}
+		lines = append(lines, fmt.Sprintf("    %s %s", icon, text))
+	}
+	if len(items) > 5 {
+		more := todoPendingStyle.Render(fmt.Sprintf("    ... and %d more", len(items)-5))
+		lines = append(lines, more)
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (m Model) inputAreaView() string {
 	var parts []string
+
+	// Show todo list above input if there are items
+	if m.todoStore != nil && m.todoStore.HasItems() {
+		todoLine := m.renderTodoBar()
+		if todoLine != "" {
+			parts = append(parts, todoLine)
+		}
+	}
+
 	parts = append(parts, divider(m.width))
 
 	// Show command hints when input starts with /
@@ -1795,8 +1885,8 @@ func (m Model) sessionPickerView() string {
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
 }
 
-func RunTUI(hasPrompt bool, pwd string) (*tea.Program, Model) {
-	m := NewModel(hasPrompt, pwd)
+func RunTUI(hasPrompt bool, pwd string, todoStore *tools.TodoStore) (*tea.Program, Model) {
+	m := NewModel(hasPrompt, pwd, todoStore)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	return p, m
 }

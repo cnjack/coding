@@ -54,11 +54,11 @@ var (
 			Padding(0, 1)
 
 	outputBoxStyle = lipgloss.NewStyle().
-			   Border(lipgloss.RoundedBorder()).
-			   BorderForeground(colorMuted).
-			   Foreground(colorText).
-			   Padding(0, 1).
-			   MarginLeft(3)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorMuted).
+			Foreground(colorText).
+			Padding(0, 1).
+			MarginLeft(3)
 
 	toolMutedStyle = lipgloss.NewStyle().
 			Foreground(colorMuted).
@@ -66,10 +66,10 @@ var (
 			Italic(true)
 
 	diffAddStyle = lipgloss.NewStyle().
-			  Foreground(colorSuccess)
+			Foreground(colorSuccess)
 
 	diffRemoveStyle = lipgloss.NewStyle().
-				Foreground(colorError)
+			Foreground(colorError)
 
 	spinnerStyle = lipgloss.NewStyle().
 			Foreground(colorSecondary)
@@ -83,14 +83,32 @@ var (
 			Bold(true)
 
 	userLabelStyle = lipgloss.NewStyle().
-			   Bold(true).
-			   Foreground(colorSecondary)
+			Bold(true).
+			Foreground(colorSecondary)
 
 	inputStyle = lipgloss.NewStyle().
 			Foreground(colorText)
 
 	dividerStyle = lipgloss.NewStyle().
 			Foreground(colorMuted)
+
+	todoLabelStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(colorSecondary)
+
+	todoCompletedStyle = lipgloss.NewStyle().
+				Foreground(colorSuccess)
+
+	todoInProgressStyle = lipgloss.NewStyle().
+				Foreground(colorWarning).
+				Bold(true)
+
+	todoPendingStyle = lipgloss.NewStyle().
+				Foreground(colorMuted)
+
+	todoCancelledStyle = lipgloss.NewStyle().
+				Foreground(colorMuted).
+				Italic(true)
 )
 
 func divider(width int) string {

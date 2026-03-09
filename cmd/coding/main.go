@@ -470,6 +470,15 @@ func runAgent(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.Messag
 		resp += extra
 	}
 
+	// Send token usage update before agent done
+	promptTokens, completionTokens, totalTokens := internalmodel.GetTokenUsage()
+	p.Send(tui.TokenUpdateMsg{
+		PromptTokens:      promptTokens,
+		CompletionTokens:  completionTokens,
+		TotalTokens:       totalTokens,
+		ModelContextLimit: getModelContextLimit(),
+	})
+
 	p.Send(tui.AgentDoneMsg{})
 	return resp
 }
@@ -594,6 +603,15 @@ func runAgentInner(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.M
 	}
 
 	return assistantText.String()
+}
+
+// getModelContextLimit returns the context limit for the currently configured model
+func getModelContextLimit() int {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return 0
+	}
+	return internalmodel.GetModelContextLimit(cfg.Model)
 }
 
 func runDoctorMode() {

@@ -105,6 +105,14 @@ type AgentsMdMsg struct {
 	Path  string
 }
 
+// TokenUpdateMsg is sent periodically to update token usage display
+type TokenUpdateMsg struct {
+	PromptTokens     int64
+	CompletionTokens int64
+	TotalTokens      int64
+	ModelContextLimit int // 0 if unknown
+}
+
 // SSHConnectMsg is sent when user initially requests connection
 type SSHConnectMsg struct {
 	Addr string // user@host
@@ -225,6 +233,12 @@ type Model struct {
 
 	// Todo store
 	todoStore *tools.TodoStore
+
+	// Token usage tracking
+	promptTokens     int64
+	completionTokens int64
+	totalTokens      int64
+	modelContextLimit int // 0 if unknown
 }
 
 // dirItem implements list.Item
@@ -985,6 +999,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, m.spinner.Tick)
 
+	case TokenUpdateMsg:
+		m.promptTokens = msg.PromptTokens
+		m.completionTokens = msg.CompletionTokens
+		m.totalTokens = msg.TotalTokens
+		m.modelContextLimit = msg.ModelContextLimit
+
 	case AgentDoneMsg:
 		m.thinking = false
 		m.flushText()
@@ -1095,7 +1115,9 @@ func (m Model) View() string {
 		footer = dividerStyle.Render("  ↑/↓ scroll • Ctrl+C quit")
 	}
 
-	return fmt.Sprintf("%s\n%s\n%s\n%s", header, headerLine, m.viewport.View(), footer)
+	// Build the main view
+	mainView := fmt.Sprintf("%s\n%s\n%s\n%s", header, headerLine, m.viewport.View(), footer)
+	return mainView
 }
 
 func (m Model) settingMenuView() string {
@@ -1347,7 +1369,7 @@ func (m Model) inputAreaView() string {
 	parts = append(parts, lipgloss.NewStyle().PaddingLeft(1).PaddingRight(2).Render(m.textarea.View()))
 	parts = append(parts, divider(m.width))
 
-	// Single status line: model on left, MCP tools on right
+	// Single status line: model on left, tokens and MCP tools on right
 	leftTxt := "  Model: "
 	if m.activeProvider != "" {
 		leftTxt += m.activeProvider + " / " + m.activeModel
@@ -1355,7 +1377,16 @@ func (m Model) inputAreaView() string {
 		leftTxt += "Not configured"
 	}
 
-	rightTxt := ""
+	// Build right side with tokens and MCP info
+	var rightParts []string
+	if m.totalTokens > 0 || m.modelContextLimit > 0 {
+		if m.modelContextLimit > 0 {
+			usagePercent := float64(m.totalTokens) / float64(m.modelContextLimit) * 100
+			rightParts = append(rightParts, fmt.Sprintf("Tokens: %d/%d (%.0f%%)", m.totalTokens, m.modelContextLimit, usagePercent))
+		} else {
+			rightParts = append(rightParts, fmt.Sprintf("Tokens: %d", m.totalTokens))
+		}
+	}
 	if len(m.mcpStatuses) > 0 {
 		activeServers := 0
 		loadedTools := 0
@@ -1365,8 +1396,9 @@ func (m Model) inputAreaView() string {
 				loadedTools += st.ToolCount
 			}
 		}
-		rightTxt = fmt.Sprintf("MCP: %d active / %d tools  ", activeServers, loadedTools)
+		rightParts = append(rightParts, fmt.Sprintf("MCP: %d/%d", activeServers, loadedTools))
 	}
+	rightTxt := strings.Join(rightParts, " │ ") + "  "
 
 	statusStyle := lipgloss.NewStyle().Foreground(colorMuted)
 	leftW := lipgloss.Width(leftTxt)

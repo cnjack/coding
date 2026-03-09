@@ -4,12 +4,50 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync/atomic"
 
 	openai "github.com/sashabaranov/go-openai"
 
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )
+
+// TokenUsage tracks token consumption across all API calls
+type TokenUsage struct {
+	PromptTokens     int64
+	CompletionTokens int64
+	TotalTokens      int64
+}
+
+// TokenTracker is a global token usage tracker
+var TokenTracker = &TokenUsage{}
+
+// Add adds token usage to the tracker
+func (t *TokenUsage) Add(prompt, completion, total int) {
+	atomic.AddInt64(&t.PromptTokens, int64(prompt))
+	atomic.AddInt64(&t.CompletionTokens, int64(completion))
+	atomic.AddInt64(&t.TotalTokens, int64(total))
+}
+
+// Get returns the current token usage
+func (t *TokenUsage) Get() (prompt, completion, total int64) {
+	return atomic.LoadInt64(&t.PromptTokens),
+		atomic.LoadInt64(&t.CompletionTokens),
+		atomic.LoadInt64(&t.TotalTokens)
+}
+
+// Reset resets the token tracker
+func (t *TokenUsage) Reset() {
+	atomic.StoreInt64(&t.PromptTokens, 0)
+	atomic.StoreInt64(&t.CompletionTokens, 0)
+	atomic.StoreInt64(&t.TotalTokens, 0)
+}
+
+// ModelInfo contains information about a model
+type ModelInfo struct {
+	ID           string
+	ContextLimit int // Maximum context window size, 0 if unknown
+}
 
 type ChatModelConfig struct {
 	Model   string
@@ -65,6 +103,10 @@ func (m *chatModel) Generate(ctx context.Context, input []*schema.Message, _ ...
 	if err != nil {
 		return nil, err
 	}
+	// Track token usage
+	if resp.Usage.TotalTokens > 0 {
+		TokenTracker.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
+	}
 	if len(resp.Choices) == 0 {
 		return nil, fmt.Errorf("empty response from model")
 	}
@@ -73,6 +115,10 @@ func (m *chatModel) Generate(ctx context.Context, input []*schema.Message, _ ...
 
 func (m *chatModel) Stream(ctx context.Context, input []*schema.Message, _ ...einomodel.Option) (*schema.StreamReader[*schema.Message], error) {
 	req := m.buildRequest(input, true)
+	// Enable stream options to get usage information
+	req.StreamOptions = &openai.StreamOptions{
+		IncludeUsage: true,
+	}
 	stream, err := m.client.CreateChatCompletionStream(ctx, req)
 	if err != nil {
 		return nil, err
@@ -90,6 +136,10 @@ func (m *chatModel) Stream(ctx context.Context, input []*schema.Message, _ ...ei
 			if err != nil {
 				sw.Send(nil, err)
 				break
+			}
+			// Track token usage from stream response
+			if resp.Usage != nil && resp.Usage.TotalTokens > 0 {
+				TokenTracker.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
 			}
 			if len(resp.Choices) == 0 {
 				continue
@@ -181,4 +231,109 @@ func toEinoToolCalls(tcs []openai.ToolCall) []schema.ToolCall {
 		}
 	}
 	return ret
+}
+
+// knownModelContextLimits maps model names to their context window sizes.
+// This is used as a fallback when the /models API doesn't return this info.
+var knownModelContextLimits = map[string]int{
+	// OpenAI models
+	"gpt-4o":                 128000,
+	"gpt-4o-mini":            128000,
+	"gpt-4-turbo":            128000,
+	"gpt-4-turbo-preview":    128000,
+	"gpt-4-0125-preview":     128000,
+	"gpt-4-1106-preview":     128000,
+	"gpt-4":                  8192,
+	"gpt-4-32k":              32768,
+	"gpt-3.5-turbo":          16385,
+	"gpt-3.5-turbo-16k":      16385,
+	"o1":                     200000,
+	"o1-preview":             128000,
+	"o1-mini":                128000,
+	// Claude models (for Anthropic-compatible APIs)
+	"claude-3-5-sonnet-latest": 200000,
+	"claude-3-5-sonnet-20241022": 200000,
+	"claude-3-5-sonnet-20240620": 200000,
+	"claude-3-5-haiku-latest":   200000,
+	"claude-3-5-haiku-20241022": 200000,
+	"claude-3-opus-20240229":    200000,
+	"claude-3-sonnet-20240229":  200000,
+	"claude-3-haiku-20240307":   200000,
+	"claude-sonnet-4-20250514":  200000,
+	"claude-opus-4-20250514":    200000,
+	// DeepSeek models
+	"deepseek-chat":      64000,
+	"deepseek-coder":     16000,
+	"deepseek-reasoner":  64000,
+	// Other common models
+	"llama-3.1-405b":  128000,
+	"llama-3.1-70b":   128000,
+	"llama-3.1-8b":    128000,
+	"llama-3-70b":     8192,
+	"llama-3-8b":      8192,
+	"mixtral-8x7b":    32768,
+	"mixtral-8x22b":   65536,
+	"mistral-large":   128000,
+	"gemini-1.5-pro":  1000000,
+	"gemini-1.5-flash": 1000000,
+}
+
+// GetModelInfo retrieves model information. It first tries the /models API,
+// then falls back to known model limits.
+func (m *chatModel) GetModelInfo(ctx context.Context) ModelInfo {
+	info := ModelInfo{ID: m.model}
+
+	// Try to get model info from API (may not work for all providers)
+	model, err := m.client.GetModel(ctx, m.model)
+	if err == nil {
+		info.ID = model.ID
+	}
+
+	// Look up known context limit
+	if limit, ok := knownModelContextLimits[m.model]; ok {
+		info.ContextLimit = limit
+	} else {
+		// Try partial match for model name patterns
+		for pattern, limit := range knownModelContextLimits {
+			if containsModelPattern(m.model, pattern) {
+				info.ContextLimit = limit
+				break
+			}
+		}
+	}
+
+	return info
+}
+
+// containsModelPattern checks if the model name matches a pattern (partial match)
+func containsModelPattern(model, pattern string) bool {
+	// Simple prefix/suffix matching
+	return len(model) >= len(pattern) &&
+		(model == pattern ||
+			(len(model) > len(pattern) && (model[:len(pattern)] == pattern || model[len(model)-len(pattern):] == pattern)))
+}
+
+// GetTokenUsage returns the current token usage statistics
+func GetTokenUsage() (prompt, completion, total int64) {
+	return TokenTracker.Get()
+}
+
+// ResetTokenUsage resets the token usage tracker
+func ResetTokenUsage() {
+	TokenTracker.Reset()
+}
+
+// GetModelContextLimit returns the known context limit for a given model name.
+// Returns 0 if the model is not in the known list.
+func GetModelContextLimit(modelName string) int {
+	if limit, ok := knownModelContextLimits[modelName]; ok {
+		return limit
+	}
+	// Try partial match
+	for pattern, limit := range knownModelContextLimits {
+		if containsModelPattern(modelName, pattern) {
+			return limit
+		}
+	}
+	return 0
 }

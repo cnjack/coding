@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -223,11 +224,11 @@ func main() {
 		configCh := tui.GetConfigChannel()
 		addModelCh := tui.GetAddModelChannel()
 		resumeCh := tui.GetResumeChannel()
-		bypassModeCh := tui.GetBypassModeChannel()
+		autoApproveCh := tui.GetAutoApproveChannel()
 		for {
 			select {
-			case bypassMode := <-bypassModeCh:
-				approvalState.bypassMode = bypassMode
+			case enabled := <-autoApproveCh:
+				approvalState.approvedSession = enabled
 			case cfgMsg := <-configCh:
 				providerCfg := cfgMsg.Models[cfgMsg.Provider]
 				if providerCfg != nil {
@@ -269,6 +270,7 @@ func main() {
 					break
 				}
 				history = reconstructHistory(entries)
+				approvalState.approvedSession = false
 				p.Send(tui.SessionResumedMsg{UUID: uuid, Entries: convertToTuiEntries(entries)})
 
 			case connMsg := <-sshCh:
@@ -853,8 +855,8 @@ func handleMCPList() {
 }
 
 type ToolApprovalState struct {
-	p          *tea.Program
-	bypassMode bool
+	p               *tea.Program
+	approvedSession bool
 }
 
 func (s *ToolApprovalState) SetProgram(p *tea.Program) {
@@ -862,7 +864,7 @@ func (s *ToolApprovalState) SetProgram(p *tea.Program) {
 }
 
 func (s *ToolApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs string) (bool, error) {
-	if s.bypassMode {
+	if s.approvedSession {
 		return true, nil
 	}
 
@@ -880,6 +882,18 @@ func (s *ToolApprovalState) RequestApproval(ctx context.Context, toolName, toolA
 		return true, nil
 	}
 
+	if toolName == "execute" {
+		var input struct {
+			Command string `json:"command"`
+		}
+		if err := json.Unmarshal([]byte(toolArgs), &input); err == nil {
+			cmd := strings.TrimSpace(input.Command)
+			if cmd == "ls" || cmd == "pwd" || cmd == "env" || strings.HasPrefix(cmd, "ls ") || strings.HasPrefix(cmd, "cat ") || strings.HasPrefix(cmd, "pwd ") || strings.HasPrefix(cmd, "echo ") || strings.HasPrefix(cmd, "which ") || strings.HasPrefix(cmd, "git status") || strings.HasPrefix(cmd, "git log") {
+				return true, nil
+			}
+		}
+	}
+
 	if s.p == nil {
 		return false, fmt.Errorf("TUI program not initialized")
 	}
@@ -893,6 +907,9 @@ func (s *ToolApprovalState) RequestApproval(ctx context.Context, toolName, toolA
 
 	select {
 	case resp := <-respCh:
+		if resp.Approved {
+			s.approvedSession = true
+		}
 		return resp.Approved, nil
 	case <-ctx.Done():
 		return false, ctx.Err()

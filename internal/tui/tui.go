@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path"
@@ -20,184 +19,12 @@ import (
 	"github.com/cnjack/coding/internal/tools"
 )
 
-const maxToolOutputLen = 500
-
-var promptCh = make(chan string, 1)
-
-var pendingPromptCh = make(chan string, 16)
-
-var sshCh = make(chan interface{}, 1)
-
-func GetPromptChannel() <-chan string {
-	return promptCh
-}
-
-func GetPendingPromptChannel() <-chan string {
-	return pendingPromptCh
-}
-
-func GetSSHChannel() <-chan interface{} {
-	return sshCh
-}
-
-var configCh = make(chan *config.Config, 1)
-
-// GetConfigChannel returns the channel that receives configuration changes.
-func GetConfigChannel() <-chan *config.Config {
-	return configCh
-}
-
-// addModelCh is used to notify main goroutine to launch add-model setup wizard.
-var addModelCh = make(chan struct{}, 1)
-
-// GetAddModelChannel returns the channel that receives add-model requests.
-func GetAddModelChannel() <-chan struct{} {
-	return addModelCh
-}
-
-// resumeCh is used to pass a selected session UUID from TUI to the main goroutine.
-var resumeCh = make(chan string, 1)
-
-// GetResumeChannel returns the channel that receives session resume requests.
-func GetResumeChannel() <-chan string {
-	return resumeCh
-}
-
-// approvalCh is used to pass tool approval requests from main goroutine to TUI.
-var approvalCh = make(chan ToolApprovalRequestMsg, 1)
-
-// GetApprovalChannel returns the channel that receives tool approval requests.
-func GetApprovalChannel() chan ToolApprovalRequestMsg {
-	return approvalCh
-}
-
-// bypassModeCh is used to notify main goroutine when bypass mode is toggled.
-var bypassModeCh = make(chan bool, 1)
-
-// GetBypassModeChannel returns the channel that receives bypass mode changes.
-func GetBypassModeChannel() <-chan bool {
-	return bypassModeCh
-}
-
-// --- Messages ---
-
-type AgentTextMsg struct{ Text string }
-type ToolCallMsg struct{ Name, Args string }
-type ToolResultMsg struct {
-	Name, Output string
-	Err          error
-}
-type AgentDoneMsg struct{ Err error }
-type PromptSubmitMsg struct{ Prompt string }
-type UserPromptMsg struct{ Prompt string }
-
-// TodoUpdateMsg signals that the todo store has been updated.
-type TodoUpdateMsg struct{}
-
-// AddModelMsg signals that the user wants to add a new model via setup wizard
-type AddModelMsg struct{}
-
-// ResumeRequestMsg is sent when the user requests to resume a session by UUID.
-type ResumeRequestMsg struct{ UUID string }
-
-// SessionEntry is a display-ready record from a replayed session.
-type SessionEntry struct {
-	Type    string
-	Content string
-	Name    string
-	Args    string
-	Output  string
-	Error   string
-}
-
-// SessionResumedMsg is sent by the main goroutine to replay a session in the TUI.
-type SessionResumedMsg struct {
-	UUID    string
-	Entries []SessionEntry
-}
-
-// AgentsMdMsg is sent by the main goroutine to notify TUI that agents.md was loaded.
-type AgentsMdMsg struct {
-	Found bool
-	Path  string
-}
-
-// TokenUpdateMsg is sent periodically to update token usage display
-type TokenUpdateMsg struct {
-	PromptTokens      int64
-	CompletionTokens  int64
-	TotalTokens       int64
-	ModelContextLimit int // 0 if unknown
-}
-
-// ToolApprovalRequestMsg is sent when a tool needs user approval
-type ToolApprovalRequestMsg struct {
-	Name string
-	Args string
-	Resp chan ToolApprovalResponse
-}
-
-// ToolApprovalResponse is the user's response to a tool approval request
-type ToolApprovalResponse struct {
-	Approved bool
-}
-
-// BypassModeToggleMsg is sent when user toggles bypass mode
-type BypassModeToggleMsg struct{}
-
-// SSHConnectMsg is sent when user initially requests connection
-type SSHConnectMsg struct {
-	Addr string // user@host
-	Path string // remote working dir (optional)
-}
-
-// SSHListDirReqMsg is sent when TUI needs to list a directory on the remote machine
-type SSHListDirReqMsg struct {
-	Path string
-}
-
-// SSHDirResultsMsg is sent from main to TUI with directory contents
-type SSHDirResultsMsg struct {
-	Path  string
-	Items []string
-	Err   error
-}
-
-// SSHStatusMsg carries the result of an SSH connection attempt.
-type SSHStatusMsg struct {
-	Success bool
-	Label   string // e.g. "root@myserver:22"
-	Err     error
-}
-
-// SSHCancelMsg is sent when user cancels the SSH dir picker via Esc.
-type SSHCancelMsg struct{}
-
-// ConfigUpdatedMsg is sent when the provider/model configuration is updated via setup wizard
-type ConfigUpdatedMsg struct {
-	Provider string
-	Model    string
-	Message  string
-}
-
-type MCPStatusItem struct {
-	Name      string
-	ToolCount int
-	Running   bool
-	ErrMsg    string
-}
-
-type MCPStatusMsg struct {
-	Statuses []MCPStatusItem
-}
-
 // --- Model ---
 
 type Mode int
 
 const (
-	ModeWelcome Mode = iota
-	ModeAgent
+	ModeAgent Mode = iota
 )
 
 type Model struct {
@@ -261,8 +88,7 @@ type Model struct {
 	modelContextLimit int
 
 	pendingPrompts []string
-
-	bypassMode bool
+	autoApprove    bool
 
 	approvalPending  bool
 	approvalToolName string
@@ -356,11 +182,20 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 		glamour.WithWordWrap(100),
 	)
 
-	mode := ModeWelcome
+	mode := ModeAgent
 	thinking := false
+	var initialLines []string
 	if hasPrompt {
-		mode = ModeAgent
 		thinking = true
+	} else {
+		initialLines = []string{
+			lipgloss.NewStyle().Foreground(colorMuted).Render("Welcome to Little Jack. How can I help you today?"),
+			"",
+			lipgloss.NewStyle().Foreground(colorText).PaddingLeft(2).Render("💡 Describe a task and I'll help you code it"),
+			lipgloss.NewStyle().Foreground(colorText).PaddingLeft(2).Render("📁 I can read, write, and edit files in your project"),
+			lipgloss.NewStyle().Foreground(colorText).PaddingLeft(2).Render("⚡ I can execute shell commands for you"),
+			"",
+		}
 	}
 
 	delegate := list.NewDefaultDelegate()
@@ -414,6 +249,7 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 		pwd:            pwd,
 		history:        loadHistory(),
 		todoStore:      todoStore,
+		lines:          initialLines,
 	}
 	m.historyIndex = len(m.history)
 
@@ -463,7 +299,7 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) inputActive() bool {
-	return (m.mode == ModeWelcome || m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt) && !m.pickingModel && !m.showingSetting && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending
+	return (m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt) && !m.pickingModel && !m.showingSetting && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -471,14 +307,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 
+	case tea.MouseMsg:
+		if m.pickingSession {
+			var cmd tea.Cmd
+			m.sessionPicker, cmd = m.sessionPicker.Update(msg)
+			cmds = append(cmds, cmd)
+		} else if m.showingSetting {
+			var cmd tea.Cmd
+			m.settingMenu, cmd = m.settingMenu.Update(msg)
+			cmds = append(cmds, cmd)
+		} else if m.pickingSSHAlias {
+			var cmd tea.Cmd
+			m.sshAliasPicker, cmd = m.sshAliasPicker.Update(msg)
+			cmds = append(cmds, cmd)
+		} else if m.pickingModel {
+			var cmd tea.Cmd
+			m.modelPicker, cmd = m.modelPicker.Update(msg)
+			cmds = append(cmds, cmd)
+		} else if m.sshStep == 3 {
+			var cmd tea.Cmd
+			m.dirList, cmd = m.dirList.Update(msg)
+			cmds = append(cmds, cmd)
+		} else if m.ready {
+			var vpCmd tea.Cmd
+			m.viewport, vpCmd = m.viewport.Update(msg)
+			cmds = append(cmds, vpCmd)
+		}
+		return m, tea.Batch(cmds...)
+
 	case tea.KeyMsg:
 		// Tool approval dialog handling
 		if m.approvalPending {
 			switch msg.String() {
 			case "y", "Y":
 				m.approvalPending = false
+				m.autoApprove = true
 				if m.approvalRespChan != nil {
 					m.approvalRespChan <- ToolApprovalResponse{Approved: true}
+				}
+				select {
+				case autoApproveCh <- true:
+				default:
 				}
 				m.textarea.Focus()
 				m.refreshViewport()
@@ -487,15 +356,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.approvalPending = false
 				if m.approvalRespChan != nil {
 					m.approvalRespChan <- ToolApprovalResponse{Approved: false}
-				}
-				m.textarea.Focus()
-				m.refreshViewport()
-				return m, tea.Batch(cmds...)
-			case "b", "B":
-				m.bypassMode = true
-				m.approvalPending = false
-				if m.approvalRespChan != nil {
-					m.approvalRespChan <- ToolApprovalResponse{Approved: true}
 				}
 				m.textarea.Focus()
 				m.refreshViewport()
@@ -699,9 +559,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "ctrl+c":
 				return m, tea.Quit
-			case "ctrl+b", "shift+tab":
-				m.bypassMode = !m.bypassMode
-				bypassModeCh <- m.bypassMode
+			case "shift+tab":
+				m.autoApprove = !m.autoApprove
+				select {
+				case autoApproveCh <- m.autoApprove:
+				default:
+				}
 				m.refreshViewport()
 				return m, tea.Batch(cmds...)
 			case "enter":
@@ -738,6 +601,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 					if m.sshStep > 0 {
 						return m.handleSSHStep(prompt, cmds)
+					}
+
+					if m.lines != nil && len(m.lines) > 0 {
+						// Check if the lines are the initial welcome message, we clear it.
+						if strings.Contains(m.lines[0], "Welcome to Little Jack") {
+							m.lines = nil
+						}
 					}
 
 					if !m.agentDone && m.thinking {
@@ -908,6 +778,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 
 	case SessionResumedMsg:
+		m.autoApprove = false
 		m.thinking = false
 		m.mode = ModeAgent
 		m.agentDone = true
@@ -1109,9 +980,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textarea.Blur()
 		m.refreshViewport()
 
-	case BypassModeToggleMsg:
-		m.bypassMode = !m.bypassMode
-		m.refreshViewport()
 	}
 
 	if m.ready && m.mode == ModeAgent {
@@ -1182,10 +1050,6 @@ func (m Model) View() string {
 		return m.sessionPickerView()
 	}
 
-	if m.mode == ModeWelcome {
-		return m.welcomeView()
-	}
-
 	if !m.ready {
 		return "\n  Initializing..."
 	}
@@ -1217,609 +1081,12 @@ func (m Model) View() string {
 	return mainView
 }
 
-func (m Model) settingMenuView() string {
-	w, h := m.width, m.height
-	if w <= 0 {
-		w = 80
-	}
-	if h <= 0 {
-		h = 24
-	}
-
-	modW, modH := w-8, h-4
-	if modW > 120 {
-		modW = 120
-	}
-
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorPrimary).
-		Padding(0, 1).
-		Width(modW)
-
-	headerText := fmt.Sprintf(" %s ", toolNameStyle.Render("⚙ Settings"))
-
-	m.settingMenu.SetSize(modW-6, modH-6)
-	m.settingMenu.Title = "Settings (↑/↓ to navigate, Enter to confirm, Esc to cancel)"
-	m.settingMenu.SetShowHelp(false)
-	m.settingMenu.SetShowStatusBar(true)
-	m.settingMenu.SetShowPagination(false)
-
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Bold(true).Padding(0, 1).Render(headerText),
-		"",
-		m.settingMenu.View(),
-	)
-
-	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
-}
-
-func (m Model) sshAliasPickerView() string {
-	w, h := m.width, m.height
-	if w <= 0 {
-		w = 80
-	}
-	if h <= 0 {
-		h = 24
-	}
-
-	modW, modH := w-8, h-4
-	if modW > 120 {
-		modW = 120
-	}
-
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorPrimary).
-		Padding(0, 1).
-		Width(modW)
-
-	headerText := fmt.Sprintf(" %s ", toolNameStyle.Render("🔗 SSH Connections"))
-
-	m.sshAliasPicker.SetSize(modW-6, modH-6)
-	m.sshAliasPicker.Title = "Select SSH connection (↑/↓ to navigate, Enter to connect, Esc to cancel)"
-	m.sshAliasPicker.SetShowHelp(false)
-	m.sshAliasPicker.SetShowStatusBar(true)
-	m.sshAliasPicker.SetShowPagination(false)
-
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Bold(true).Padding(0, 1).Render(headerText),
-		"",
-		m.sshAliasPicker.View(),
-	)
-
-	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
-}
-
-func (m Model) modelPickerView() string {
-	w, h := m.width, m.height
-	if w <= 0 {
-		w = 80
-	}
-	if h <= 0 {
-		h = 24
-	}
-
-	modW, modH := w-8, h-4
-	if modW > 120 {
-		modW = 120
-	}
-
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorPrimary).
-		Padding(0, 1).
-		Width(modW)
-
-	headerText := fmt.Sprintf(" %s ", toolNameStyle.Render("Select Model"))
-
-	m.modelPicker.SetSize(modW-6, modH-6)
-	m.modelPicker.Title = "Select model (↑/↓ to navigate, Enter to confirm, Esc to cancel)"
-	m.modelPicker.SetShowHelp(false)
-	m.modelPicker.SetShowStatusBar(true)
-	m.modelPicker.SetShowPagination(false)
-
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Bold(true).Padding(0, 1).Render(headerText),
-		"",
-		m.modelPicker.View(),
-	)
-
-	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
-}
-
-func (m Model) dirPickerView() string {
-	w, h := m.width, m.height
-	if w <= 0 {
-		w = 80
-	}
-	if h <= 0 {
-		h = 24
-	}
-
-	modW, modH := w-8, h-4
-	if modW > 120 {
-		modW = 120
-	}
-
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorPrimary).
-		Padding(0, 1).
-		Width(modW)
-
-	headerText := fmt.Sprintf(" Open Folder: %s ", toolNameStyle.Render(m.sshAddr))
-
-	pathBox := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(colorSecondary).
-		Padding(0, 1).
-		Foreground(colorText).
-		Width(modW - 4).
-		Render(m.sshPath)
-
-	m.dirList.SetSize(modW-6, modH-10)
-	m.dirList.Title = "↑/↓ navigate · Enter browse · Tab open folder · Esc cancel"
-	m.dirList.SetShowHelp(false)
-	m.dirList.SetShowStatusBar(true)
-	m.dirList.SetShowPagination(false)
-
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Bold(true).Padding(0, 1).Render(headerText),
-		pathBox,
-		"",
-		m.dirList.View(),
-	)
-
-	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
-}
-
-func (m Model) approvalDialogView() string {
-	w, h := m.width, m.height
-	if w <= 0 {
-		w = 80
-	}
-	if h <= 0 {
-		h = 24
-	}
-
-	modW := 60
-	if modW > w-8 {
-		modW = w - 8
-	}
-
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorWarning).
-		Padding(1, 2).
-		Width(modW)
-
-	headerText := toolNameStyle.Render("⚠️ Tool Approval Required")
-
-	argsDisplay := m.approvalToolArgs
-	if len(argsDisplay) > 200 {
-		argsDisplay = argsDisplay[:200] + "..."
-	}
-
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Bold(true).Render(headerText),
-		"",
-		fmt.Sprintf("Tool: %s", toolNameStyle.Render(m.approvalToolName)),
-		"",
-		lipgloss.NewStyle().Foreground(colorMuted).Render("Arguments:"),
-		lipgloss.NewStyle().Foreground(colorText).Render(argsDisplay),
-		"",
-		lipgloss.NewStyle().Foreground(colorMuted).Render("[y] Approve  [n] Reject  [b] Bypass all"),
-	)
-
-	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
-}
-
-// todoBarHeight returns the number of lines the todo bar occupies.
-func (m Model) todoBarHeight() int {
-	if m.todoStore == nil || !m.todoStore.HasItems() {
-		return 0
-	}
-	items := m.todoStore.Items()
-	// Count: label line + item lines (max 5 visible)
-	n := len(items)
-	if n > 5 {
-		n = 5
-	}
-	return 1 + n // header + items
-}
-
-// renderTodoBar renders the todo items as a compact block above the input.
-func (m Model) renderTodoBar() string {
-	if m.todoStore == nil {
-		return ""
-	}
-	items := m.todoStore.Items()
-	if len(items) == 0 {
-		return ""
-	}
-
-	var completed, total int
-	total = len(items)
-	for _, item := range items {
-		if item.Status == tools.TodoCompleted {
-			completed++
-		}
-	}
-
-	header := todoLabelStyle.Render(fmt.Sprintf("📋 Todo (%d/%d)", completed, total))
-
-	var lines []string
-	lines = append(lines, "  "+header)
-
-	shown := items
-	if len(shown) > 5 {
-		shown = shown[:5]
-	}
-	for _, item := range shown {
-		var icon, text string
-		switch item.Status {
-		case tools.TodoCompleted:
-			icon = todoCompletedStyle.Render("✓")
-			text = todoCompletedStyle.Render(item.Title)
-		case tools.TodoInProgress:
-			icon = todoInProgressStyle.Render("⏳")
-			text = todoInProgressStyle.Render(item.Title)
-		case tools.TodoCancelled:
-			icon = todoCancelledStyle.Render("✗")
-			text = todoCancelledStyle.Render(item.Title)
-		default: // pending
-			icon = todoPendingStyle.Render("○")
-			text = todoPendingStyle.Render(item.Title)
-		}
-		lines = append(lines, fmt.Sprintf("    %s %s", icon, text))
-	}
-	if len(items) > 5 {
-		more := todoPendingStyle.Render(fmt.Sprintf("    ... and %d more", len(items)-5))
-		lines = append(lines, more)
-	}
-	return strings.Join(lines, "\n")
-}
-
-func (m Model) inputAreaView() string {
-	var parts []string
-
-	if m.todoStore != nil && m.todoStore.HasItems() {
-		todoLine := m.renderTodoBar()
-		if todoLine != "" {
-			parts = append(parts, todoLine)
-		}
-	}
-
-	parts = append(parts, divider(m.width))
-
-	val := m.textarea.Value()
-	if strings.HasPrefix(val, "/") {
-		hints := m.getCommandHints(val)
-		if hints != "" {
-			hintStyle := lipgloss.NewStyle().PaddingLeft(2).Foreground(colorMuted).Italic(true)
-			parts = append(parts, hintStyle.Render(hints))
-		}
-	}
-
-	parts = append(parts, lipgloss.NewStyle().PaddingLeft(1).PaddingRight(2).Render(strings.TrimRight(m.textarea.View(), "\n")))
-	parts = append(parts, divider(m.width))
-
-	leftTxt := "  Model: "
-	if m.activeProvider != "" {
-		leftTxt += m.activeProvider + " / " + m.activeModel
-	} else {
-		leftTxt += "Not configured"
-	}
-
-	var rightParts []string
-	if m.bypassMode {
-		rightParts = append(rightParts, "Mode: "+lipgloss.NewStyle().Foreground(colorWarning).Render("BYPASS"))
-	} else {
-		rightParts = append(rightParts, "Mode: "+lipgloss.NewStyle().Foreground(colorMuted).Render("default"))
-	}
-	if m.totalTokens > 0 || m.modelContextLimit > 0 {
-		if m.modelContextLimit > 0 {
-			usagePercent := float64(m.totalTokens) / float64(m.modelContextLimit) * 100
-			rightParts = append(rightParts, fmt.Sprintf("Tokens: %d/%d (%.0f%%)", m.totalTokens, m.modelContextLimit, usagePercent))
-		} else {
-			rightParts = append(rightParts, fmt.Sprintf("Tokens: %d", m.totalTokens))
-		}
-	}
-	if len(m.mcpStatuses) > 0 {
-		activeServers := 0
-		loadedTools := 0
-		for _, st := range m.mcpStatuses {
-			if st.Running {
-				activeServers++
-				loadedTools += st.ToolCount
-			}
-		}
-		rightParts = append(rightParts, fmt.Sprintf("MCP: %d/%d", activeServers, loadedTools))
-	}
-	rightTxt := strings.Join(rightParts, " │ ") + "  "
-
-	statusStyle := lipgloss.NewStyle().Foreground(colorMuted)
-	leftW := lipgloss.Width(leftTxt)
-	rightW := lipgloss.Width(rightTxt)
-	space := m.width - leftW - rightW
-	if space < 1 {
-		space = 1
-	}
-	statusLine := leftTxt + strings.Repeat(" ", space) + rightTxt
-	parts = append(parts, statusStyle.Render(statusLine))
-
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
-}
-
-func (m Model) getCommandHints(input string) string {
-	type cmdHint struct {
-		cmd  string
-		desc string
-	}
-	commands := []cmdHint{
-		{"/setting", "Settings menu"},
-		{"/model", "Switch model"},
-		{"/ssh", "SSH connection"},
-		{"/resume", "Resume a previous session"},
-	}
-
-	var matches []string
-	for _, c := range commands {
-		if strings.HasPrefix(c.cmd, input) {
-			matches = append(matches, c.cmd+" "+c.desc)
-		}
-	}
-	if len(matches) == 0 {
-		return ""
-	}
-	return "  " + strings.Join(matches, "  │  ")
-}
-
-func (m Model) handleModelInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		m.lines = append(m.lines, toolErrorStyle.Render("✗ Failed to load config: "+err.Error()))
-		return m, tea.Batch(cmds...)
-	}
-
-	var items []list.Item
-	for provider, pCfg := range cfg.Models {
-		for _, modelName := range pCfg.Models {
-			desc := "Provider: " + provider
-			if provider == cfg.Provider && modelName == cfg.Model {
-				desc += " (Current)"
-			}
-			items = append(items, modelItem{
-				provider: provider,
-				model:    modelName,
-				title:    provider + " - " + modelName,
-				desc:     desc,
-			})
-		}
-	}
-	m.modelPicker.SetItems(items)
-	m.pickingModel = true
-	m.textarea.Blur()
-	m.modelPicker.Title = "Select Model"
-	return m, tea.Batch(cmds...)
-}
-
-// handleSettingInput shows the setting menu.
-func (m Model) handleSettingInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
-	items := []list.Item{
-		settingItem{title: "🔀 Switch Model", desc: "Switch to a different configured model", key: "switch_model"},
-		settingItem{title: "➕ Add New Model", desc: "Add a new model provider via setup wizard", key: "add_model"},
-		settingItem{title: "📝 Edit Config File", desc: "Manually edit " + config.ConfigPath(), key: "edit_config"},
-	}
-	m.settingMenu.SetItems(items)
-	m.showingSetting = true
-	m.textarea.Blur()
-	return m, tea.Batch(cmds...)
-}
-
-// handleSSHInput parses the /ssh command and begins the guided flow.
-// Formats: /ssh | /ssh user@host | /ssh user@host:/path
-func (m Model) handleSSHInput(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
-	arg := strings.TrimSpace(strings.TrimPrefix(input, "/ssh"))
-
-	// /ssh with no args → show saved aliases or new connection option
-	if arg == "" {
-		cfg, _ := config.LoadConfig()
-		var items []list.Item
-		if cfg != nil && len(cfg.SSHAliases) > 0 {
-			for _, alias := range cfg.SSHAliases {
-				desc := alias.Addr
-				if alias.Path != "" {
-					desc += ":" + alias.Path
-				}
-				items = append(items, sshAliasItem{
-					title: "🔗 " + alias.Name,
-					desc:  desc,
-					addr:  alias.Addr,
-					path:  alias.Path,
-				})
-			}
-		}
-		items = append(items, sshAliasItem{
-			title: "➕ Connect New SSH",
-			desc:  "Enter a new SSH address",
-			isNew: true,
-		})
-		m.sshAliasPicker.SetItems(items)
-		m.pickingSSHAlias = true
-		m.textarea.Blur()
-		return m, tea.Batch(cmds...)
-	}
-
-	// Check if path is included: user@host:/path
-	if colonIdx := strings.LastIndex(arg, ":"); colonIdx > 0 {
-		// Make sure it's not just user@host (no path after colon)
-		possiblePath := arg[colonIdx+1:]
-		if strings.HasPrefix(possiblePath, "/") {
-			addr := arg[:colonIdx]
-			path := possiblePath
-			// Remember for save prompt
-			m.sshSaveAddr = addr
-			m.sshSavePath = path
-			return m.startSSHConnect(addr, path, cmds)
-		}
-	}
-
-	// /ssh user@host → ask for path interactively, remember addr for save
-	m.sshSaveAddr = arg
-	m.sshSavePath = ""
-	return m.startSSHConnect(arg, "?", cmds)
-}
-
-// handleSSHSaveAlias handles the user's response to the alias save prompt.
-func (m Model) handleSSHSaveAlias(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
-	m.sshSavePrompt = false
-	m.textarea.Placeholder = "Type your prompt here..."
-
-	input = strings.TrimSpace(input)
-	if input == "" || strings.ToLower(input) == "n" || strings.ToLower(input) == "no" {
-		m.lines = append(m.lines, toolLabelStyle.Render("⚙ SSH:")+" Alias not saved.")
-		m.refreshViewport()
-		return m, tea.Batch(cmds...)
-	}
-
-	// Save the alias
-	aliasName := input
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		cfg = &config.Config{
-			Models:        make(map[string]*config.ProviderConfig),
-			MaxIterations: 1000,
-		}
-	}
-
-	// Check for duplicate name and replace
-	found := false
-	for i, a := range cfg.SSHAliases {
-		if a.Name == aliasName {
-			cfg.SSHAliases[i].Addr = m.sshSaveAddr
-			cfg.SSHAliases[i].Path = m.sshSavePath
-			found = true
-			break
-		}
-	}
-	if !found {
-		cfg.SSHAliases = append(cfg.SSHAliases, config.SSHAlias{
-			Name: aliasName,
-			Addr: m.sshSaveAddr,
-			Path: m.sshSavePath,
-		})
-	}
-
-	if err := config.SaveConfig(cfg); err != nil {
-		m.lines = append(m.lines, toolErrorStyle.Render("✗ Failed to save alias: "+err.Error()))
-	} else {
-		m.lines = append(m.lines, toolLabelStyle.Render("⚙ SSH:")+" Saved alias '"+aliasName+"' → "+m.sshSaveAddr)
-	}
-	m.sshSaveAddr = ""
-	m.sshSavePath = ""
-	m.refreshViewport()
-	return m, tea.Batch(cmds...)
-}
-
-// handleSSHStep handles input during the SSH setup wizard.
-func (m Model) handleSSHStep(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
-	switch m.sshStep {
-	case 1: // User entered host
-		addr := input
-		// Check for addr:/path format
-		if colonIdx := strings.LastIndex(addr, ":"); colonIdx > 0 {
-			possiblePath := addr[colonIdx+1:]
-			if strings.HasPrefix(possiblePath, "/") {
-				m.sshStep = 0
-				return m.startSSHConnect(addr[:colonIdx], possiblePath, cmds)
-			}
-		}
-		// Trigger interactive picker
-		m.sshStep = 0
-		return m.startSSHConnect(addr, "?", cmds)
-	}
-
-	// Should not happen, reset
-	m.sshStep = 0
-	m.textarea.Placeholder = "Type your prompt here..."
-	return m, tea.Batch(cmds...)
-}
-
-// startSSHConnect sends the connect message and updates the UI.
-func (m Model) startSSHConnect(addr, path string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
-	m.sshStep = 0
-	m.sshAddr = addr
-	m.mode = ModeAgent
-	m.agentDone = false
-	m.thinking = true
-	m.textarea.Placeholder = "Type your prompt here..."
-
-	display := addr
-	if path != "" {
-		display = addr + ":" + path
-	}
-	m.lines = append(m.lines, fmt.Sprintf("%s Connecting to %s...",
-		toolLabelStyle.Render("🔗 SSH:"), toolNameStyle.Render(display)))
-	m.refreshViewport()
-
-	cmds = append(cmds, func() tea.Msg {
-		return SSHConnectMsg{Addr: addr, Path: path}
-	})
-	cmds = append(cmds, m.spinner.Tick)
-	return m, tea.Batch(cmds...)
-}
-
 // refreshViewport updates the viewport content if ready.
 func (m *Model) refreshViewport() {
 	if m.ready {
 		m.viewport.SetContent(m.renderContent())
 		m.viewport.GotoBottom()
 	}
-}
-
-func (m Model) welcomeView() string {
-	w := m.width
-	if w <= 0 {
-		w = 80
-	}
-	h := m.height
-	if h <= 0 {
-		h = 24
-	}
-
-	logo := lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render("🚀 Little Jack")
-	subtitle := lipgloss.NewStyle().Foreground(colorMuted).Italic(true).Render("Coding Assistant")
-	headerBlock := lipgloss.NewStyle().Width(w).Align(lipgloss.Center).PaddingTop(1).
-		Render(lipgloss.JoinVertical(lipgloss.Center, logo, subtitle))
-
-	tips := []string{
-		"💡  Describe a task and I'll help you code it",
-		"📁  I can read, write, and edit files in your project",
-		"🔍  I can search through your codebase with grep",
-		"⚡  I can execute shell commands for you",
-	}
-	if m.agentsMdFound {
-		tips = append(tips, "📋  Custom instructions loaded from agents.md")
-	}
-	var tipsBlock strings.Builder
-	for _, tip := range tips {
-		tipsBlock.WriteString(lipgloss.NewStyle().Foreground(colorText).PaddingLeft(4).Render(tip))
-		tipsBlock.WriteString("\n")
-	}
-	tipsRendered := lipgloss.NewStyle().Width(w).Align(lipgloss.Center).PaddingTop(1).
-		Render(tipsBlock.String())
-
-	inputArea := m.inputAreaView()
-
-	topContent := lipgloss.JoinVertical(lipgloss.Left, headerBlock, tipsRendered)
-	gap := h - lipgloss.Height(topContent) - lipgloss.Height(inputArea)
-	if gap < 1 {
-		gap = 1
-	}
-
-	return lipgloss.JoinVertical(lipgloss.Left, topContent, strings.Repeat("\n", gap), inputArea)
 }
 
 // --- Helpers ---
@@ -1865,210 +1132,9 @@ func (m *Model) renderContent() string {
 	return sb.String()
 }
 
-func formatToolArgs(argsJSON string) string {
-	if argsJSON == "" {
-		return ""
-	}
-	var args map[string]interface{}
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return truncate(argsJSON, 120)
-	}
-	parts := make([]string, 0, len(args))
-	for k, v := range args {
-		val := truncate(fmt.Sprintf("%v", v), 60)
-		parts = append(parts, fmt.Sprintf("%s=%s", k, val))
-	}
-	return truncate(strings.Join(parts, " "), 200)
-}
-
-func truncate(s string, maxLen int) string {
-	s = strings.ReplaceAll(s, "\n", "↲")
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "…"
-}
-
-// formatToolResult returns styled output lines depending on the tool name.
-func formatToolResult(toolName, output string, termWidth int) []string {
-	switch toolName {
-	case "execute":
-		return formatExecuteOutput(output, termWidth)
-	case "edit":
-		return formatEditOutput(output, termWidth)
-	default:
-		return []string{fmt.Sprintf("   %s %s",
-			toolSuccessStyle.Render("✓ Done:"),
-			toolResultStyle.Render(truncate(output, maxToolOutputLen)))}
-	}
-}
-
-// formatExecuteOutput shows the last 5 lines of command output in a bordered box.
-func formatExecuteOutput(output string, termWidth int) []string {
-	const tailLines = 5
-	rawLines := strings.Split(strings.TrimRight(output, "\n"), "\n")
-
-	// Take last N lines
-	start := 0
-	if len(rawLines) > tailLines {
-		start = len(rawLines) - tailLines
-	}
-	tail := rawLines[start:]
-
-	var boxContent strings.Builder
-	if start > 0 {
-		boxContent.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
-			Render(fmt.Sprintf("... (%d lines hidden)", start)))
-		boxContent.WriteString("\n")
-	}
-	for i, line := range tail {
-		boxContent.WriteString(line)
-		if i < len(tail)-1 {
-			boxContent.WriteString("\n")
-		}
-	}
-
-	boxWidth := termWidth - 8
-	if boxWidth < 30 {
-		boxWidth = 30
-	}
-
-	box := outputBoxStyle.Width(boxWidth).Render(boxContent.String())
-	return []string{
-		fmt.Sprintf("   %s", toolSuccessStyle.Render("✓ Output:")),
-		box,
-	}
-}
-
-// formatEditOutput renders the edit result with colored diff lines.
-func formatEditOutput(output string, termWidth int) []string {
-	// Split output into status line and diff block
-	parts := strings.SplitN(output, "\n\n", 2)
-	statusLine := parts[0]
-
-	result := []string{
-		fmt.Sprintf("   %s %s", toolSuccessStyle.Render("✓"), toolResultStyle.Render(statusLine)),
-	}
-
-	if len(parts) < 2 {
-		return result
-	}
-
-	// Parse the diff block (```diff ... ```)
-	diffBlock := parts[1]
-	diffBlock = strings.TrimPrefix(diffBlock, "```diff\n")
-	diffBlock = strings.TrimSuffix(diffBlock, "```")
-	diffBlock = strings.TrimRight(diffBlock, "\n")
-
-	if diffBlock == "" {
-		return result
-	}
-
-	var diffContent strings.Builder
-	for _, line := range strings.Split(diffBlock, "\n") {
-		if strings.HasPrefix(line, "+ ") {
-			diffContent.WriteString(diffAddStyle.Render(line))
-		} else if strings.HasPrefix(line, "- ") {
-			diffContent.WriteString(diffRemoveStyle.Render(line))
-		} else {
-			diffContent.WriteString(line)
-		}
-		diffContent.WriteString("\n")
-	}
-
-	boxWidth := termWidth - 8
-	if boxWidth < 30 {
-		boxWidth = 30
-	}
-
-	diffBox := outputBoxStyle.Width(boxWidth).Render(strings.TrimRight(diffContent.String(), "\n"))
-	result = append(result, diffBox)
-	return result
-}
-
-// handleResumeInput parses the /resume command.
-// /resume           — shows session picker for current project
-// /resume <UUID>    — resumes specific session directly
-func (m Model) handleResumeInput(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
-	arg := strings.TrimSpace(strings.TrimPrefix(input, "/resume"))
-
-	if arg != "" {
-		// Direct UUID resume
-		m.lines = append(m.lines, toolLabelStyle.Render("📂 Loading session..."))
-		m.thinking = true
-		m.mode = ModeAgent
-		m.agentDone = false
-		uuid := arg
-		cmds = append(cmds, m.spinner.Tick)
-		cmds = append(cmds, func() tea.Msg {
-			return ResumeRequestMsg{UUID: uuid}
-		})
-		return m, tea.Batch(cmds...)
-	}
-
-	// No UUID — show session picker
-	metas, err := session.ListSessions(m.pwd)
-	if err != nil || len(metas) == 0 {
-		msg := "No sessions found for this project."
-		if err != nil {
-			msg = fmt.Sprintf("Error loading sessions: %v", err)
-		}
-		m.lines = append(m.lines, toolLabelStyle.Render("📂 Resume:")+" "+msg)
-		m.refreshViewport()
-		return m, tea.Batch(cmds...)
-	}
-
-	var items []list.Item
-	// Show newest first
-	for i := len(metas) - 1; i >= 0; i-- {
-		items = append(items, sessionListItem{meta: metas[i]})
-	}
-	m.sessionPicker.SetItems(items)
-	m.pickingSession = true
-	m.textarea.Blur()
-	return m, tea.Batch(cmds...)
-}
-
-func (m Model) sessionPickerView() string {
-	w, h := m.width, m.height
-	if w <= 0 {
-		w = 80
-	}
-	if h <= 0 {
-		h = 24
-	}
-
-	modW, modH := w-8, h-4
-	if modW > 120 {
-		modW = 120
-	}
-
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorPrimary).
-		Padding(0, 1).
-		Width(modW)
-
-	headerText := fmt.Sprintf(" %s ", toolNameStyle.Render("📂 Resume Session"))
-
-	m.sessionPicker.SetSize(modW-6, modH-6)
-	m.sessionPicker.Title = "Select session (↑/↓ navigate · Enter resume · Esc cancel)"
-	m.sessionPicker.SetShowHelp(false)
-	m.sessionPicker.SetShowStatusBar(true)
-	m.sessionPicker.SetShowPagination(false)
-
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Bold(true).Padding(0, 1).Render(headerText),
-		"",
-		m.sessionPicker.View(),
-	)
-
-	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
-}
-
 func RunTUI(hasPrompt bool, pwd string, todoStore *tools.TodoStore) (*tea.Program, Model) {
 	m := NewModel(hasPrompt, pwd, todoStore)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	return p, m
 }
 

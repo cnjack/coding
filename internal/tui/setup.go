@@ -1,26 +1,26 @@
 package tui
 
 import (
-"fmt"
-"strings"
+	"fmt"
+	"strings"
 
-"github.com/charmbracelet/bubbles/list"
-"github.com/charmbracelet/bubbles/textinput"
-tea "github.com/charmbracelet/bubbletea"
-"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
-"github.com/cnjack/coding/internal/config"
+	"github.com/cnjack/coding/internal/config"
 )
 
 type SetupDoneMsg struct{}
 
 type ProviderProfile struct {
-	ID        string
-	Name      string
-	BaseURL   string
-	Models    []string
-	NeedURL   bool // if true, prompt for URL
-	NeedKey   bool // if true, prompt for API Key
+	ID      string
+	Name    string
+	BaseURL string
+	Models  []string
+	NeedURL bool // if true, prompt for URL
+	NeedKey bool // if true, prompt for API Key
 }
 
 var DefaultProviders = []ProviderProfile{
@@ -29,16 +29,16 @@ var DefaultProviders = []ProviderProfile{
 	{ID: "openrouter", Name: "OpenRouter", BaseURL: "https://openrouter.ai/api/v1", Models: []string{"anthropic/claude-3.5-sonnet", "google/gemini-1.5-pro", "meta-llama/llama-3.1-405b"}, NeedKey: true},
 	{ID: "ollama-cloud", Name: "Ollama Cloud", BaseURL: "", Models: []string{"llama3", "llama3.1", "qwen2.5", "mistral"}, NeedURL: true, NeedKey: true},
 	{ID: "ollama", Name: "Ollama (Local)", BaseURL: "http://localhost:11434/v1", Models: []string{"llama3", "llama3.1", "qwen2.5", "mistral", "gemma2"}, NeedKey: false},
-	{ID: "minimax", Name: "MiniMax", BaseURL: "https://api.minimaxi.com/v1", Models: []string{"MiniMax M2.5-highspeed", "MiniMax M2.5", "MiniMax M2.1", "MiniMax M2"}, NeedKey: true}, // doc: https://platform.minimaxi.com/docs/api-reference/api-overview
-	{ID: "bigmodel", Name: "BigModel (Zhipu)", BaseURL: "https://open.bigmodel.cn/api/paas/v4", Models: []string{"glm-5", "glm-4.7", "glm-4-7-flashx", "glm-4.6"}, NeedKey: true}, // doc: https://docs.bigmodel.cn/cn/guide/models/text/glm-5
-	{ID: "bigmodel-plan", Name: "BigModel Plan", BaseURL: "https://open.bigmodel.cn/api/coding/paas/v4", Models: []string{"glm-5", "glm-4.7"}, NeedKey: true}, // doc: https://docs.bigmodel.cn/cn/coding-plan/overview
-	{ID: "z.ai", Name: "Z.AI", BaseURL: "https://api.z.ai/v1", Models: []string{"glm-5", "glm-4.7", "glm-4-7-flashx", "glm-4.6"}, NeedKey: true}, // same as the bigmodel
-	{ID: "z.ai-plan", Name: "Z.AI Plan", BaseURL: "https://api.z.ai/v1", Models: []string{"glm-5", "glm-4.7"}, NeedKey: true}, // same as the bigmodel
-	{ID: "moonshot-cn", Name: "Moonshot CN (Kimi)", BaseURL: "https://api.moonshot.cn/v1", Models: []string{"kimi-k2.5", "kimi-k2-turbo-preview", "kimi-k2-thinking", "kimi-k2-thinking-turbo"}, NeedKey: true}, // doc: https://platform.moonshot.cn/docs/pricing/chat
-	{ID: "moonshot-global", Name: "Moonshot Global", BaseURL: "https://api.moonshot.ai/v1", Models: []string{"moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"}, NeedKey: true}, // reviewed
-	{ID: "kimi-plan", Name: "Kimi Plan", BaseURL: "https://api.kimi.com/coding/v1", Models: []string{"kimi-for-coding"}, NeedKey: true}, // doc: https://www.kimi.com/code/docs/en/more/third-party-agents.html
-	{ID: "deepseek", Name: "DeepSeek", BaseURL: "https://api.deepseek.com", Models: []string{"deepseek-chat", "deepseek-reasoner"}, NeedKey: true}, // doc: https://api-docs.deepseek.com/zh-cn/quick_start/pricing
-	{ID: "bailian", Name: "Bailian (Aliyun)", BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", Models: []string{"qwen-plus", "qwen-max", "qwen-turbo"}, NeedKey: true}, // doc: https://bailian.console.aliyun.com/cn-beijing/?tab=doc&spm=0.0.0.i0#/doc/?type=model&url=2840914
+	{ID: "minimax", Name: "MiniMax", BaseURL: "https://api.minimaxi.com/v1", Models: []string{"MiniMax M2.5-highspeed", "MiniMax M2.5", "MiniMax M2.1", "MiniMax M2"}, NeedKey: true},                                                                                 // doc: https://platform.minimaxi.com/docs/api-reference/api-overview
+	{ID: "bigmodel", Name: "BigModel (Zhipu)", BaseURL: "https://open.bigmodel.cn/api/paas/v4", Models: []string{"glm-5", "glm-4.7", "glm-4-7-flashx", "glm-4.6"}, NeedKey: true},                                                                                     // doc: https://docs.bigmodel.cn/cn/guide/models/text/glm-5
+	{ID: "bigmodel-plan", Name: "BigModel Plan", BaseURL: "https://open.bigmodel.cn/api/coding/paas/v4", Models: []string{"glm-5", "glm-4.7"}, NeedKey: true},                                                                                                         // doc: https://docs.bigmodel.cn/cn/coding-plan/overview
+	{ID: "z.ai", Name: "Z.AI", BaseURL: "https://api.z.ai/v1", Models: []string{"glm-5", "glm-4.7", "glm-4-7-flashx", "glm-4.6"}, NeedKey: true},                                                                                                                      // same as the bigmodel
+	{ID: "z.ai-plan", Name: "Z.AI Plan", BaseURL: "https://api.z.ai/v1", Models: []string{"glm-5", "glm-4.7"}, NeedKey: true},                                                                                                                                         // same as the bigmodel
+	{ID: "moonshot-cn", Name: "Moonshot CN (Kimi)", BaseURL: "https://api.moonshot.cn/v1", Models: []string{"kimi-k2.5", "kimi-k2-turbo-preview", "kimi-k2-thinking", "kimi-k2-thinking-turbo"}, NeedKey: true},                                                       // doc: https://platform.moonshot.cn/docs/pricing/chat
+	{ID: "moonshot-global", Name: "Moonshot Global", BaseURL: "https://api.moonshot.ai/v1", Models: []string{"moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"}, NeedKey: true},                                                                                 // reviewed
+	{ID: "kimi-plan", Name: "Kimi Plan", BaseURL: "https://api.kimi.com/coding/v1", Models: []string{"kimi-for-coding"}, NeedKey: true},                                                                                                                               // doc: https://www.kimi.com/code/docs/en/more/third-party-agents.html
+	{ID: "deepseek", Name: "DeepSeek", BaseURL: "https://api.deepseek.com", Models: []string{"deepseek-chat", "deepseek-reasoner"}, NeedKey: true},                                                                                                                    // doc: https://api-docs.deepseek.com/zh-cn/quick_start/pricing
+	{ID: "bailian", Name: "Bailian (Aliyun)", BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", Models: []string{"qwen-plus", "qwen-max", "qwen-turbo"}, NeedKey: true},                                                                                   // doc: https://bailian.console.aliyun.com/cn-beijing/?tab=doc&spm=0.0.0.i0#/doc/?type=model&url=2840914
 	{ID: "bailian-plan", Name: "Bailian Plan", BaseURL: "https://coding.dashscope.aliyuncs.com/v1", Models: []string{"qwen3.5-plus", "kimi-k2.5", "glm-5", "MiniMax-M2.5", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "glm-4.7"}, NeedKey: true}, //doc: https://bailian.console.aliyun.com/cn-beijing/?tab=doc&spm=0.0.0.i0#/doc/?type=model&url=3005961
 	{ID: "siliconflow", Name: "硅基流动 (SiliconFlow)", BaseURL: "https://api.siliconflow.cn/v1", Models: []string{"deepseek-ai/DeepSeek-V2.5", "Qwen/Qwen2.5-72B-Instruct"}, NeedKey: true},
 	{ID: "magicark", Name: "魔力方舟", BaseURL: "https://api.gitee.com/v1", Models: []string{"qwen", "moonshot", "deepseek"}, NeedKey: true},
@@ -51,7 +51,8 @@ type providerItem struct {
 	profile    ProviderProfile
 	configured bool // this exact provider has an API key in config
 }
-func (i providerItem) Title() string       { return i.profile.Name }
+
+func (i providerItem) Title() string { return i.profile.Name }
 func (i providerItem) Description() string {
 	if i.configured {
 		return "✓ Configured · " + i.profile.BaseURL
@@ -67,6 +68,7 @@ type modelListItem struct {
 	name string
 	desc string
 }
+
 func (i modelListItem) Title() string       { return i.name }
 func (i modelListItem) Description() string { return i.desc }
 func (i modelListItem) FilterValue() string { return i.name }
@@ -74,20 +76,20 @@ func (i modelListItem) FilterValue() string { return i.name }
 type SetupState int
 
 const (
-StateProvider SetupState = iota
-StateModel
-StateCustomModel
-StateURL
-StateAPIKey
+	StateProvider SetupState = iota
+	StateModel
+	StateCustomModel
+	StateURL
+	StateAPIKey
 )
 
 type SetupModel struct {
-	state          SetupState
-	providerList   list.Model
-	modelList      list.Model
-	customModelIn  textinput.Model
-	urlIn          textinput.Model
-	keyIn          textinput.Model
+	state         SetupState
+	providerList  list.Model
+	modelList     list.Model
+	customModelIn textinput.Model
+	urlIn         textinput.Model
+	keyIn         textinput.Model
 
 	selectedProvider *ProviderProfile
 	selectedModel    string
@@ -339,12 +341,12 @@ func (m SetupModel) submit() (tea.Model, tea.Cmd) {
 	}
 
 	pID := m.selectedProvider.ID
-	
+
 	// Create or update provider config
 	if cfg.Models == nil {
 		cfg.Models = make(map[string]*config.ProviderConfig)
 	}
-	
+
 	pCfg, exists := cfg.Models[pID]
 	if !exists {
 		pCfg = &config.ProviderConfig{
@@ -352,10 +354,10 @@ func (m SetupModel) submit() (tea.Model, tea.Cmd) {
 		}
 		cfg.Models[pID] = pCfg
 	}
-	
+
 	pCfg.APIKey = m.finalKey
 	pCfg.BaseURL = m.finalURL
-	
+
 	// Add model to the history if not present
 	found := false
 	for _, mod := range pCfg.Models {
@@ -367,7 +369,7 @@ func (m SetupModel) submit() (tea.Model, tea.Cmd) {
 	if !found {
 		pCfg.Models = append(pCfg.Models, m.selectedModel)
 	}
-	
+
 	cfg.Provider = pID
 	cfg.Model = m.selectedModel
 
@@ -421,10 +423,10 @@ func (m SetupModel) View() string {
 	cfgPath := lipgloss.NewStyle().Foreground(colorMuted).Italic(true).PaddingLeft(2).Render("  Config: " + config.ConfigPath())
 
 	return lipgloss.JoinVertical(lipgloss.Left,
-header,
-divider(w-4),
-"\n",
-lipgloss.NewStyle().PaddingLeft(2).Render(content),
+		header,
+		divider(w-4),
+		"\n",
+		lipgloss.NewStyle().PaddingLeft(2).Render(content),
 		errLine,
 		"\n",
 		divider(w-4),

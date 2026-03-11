@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -19,7 +20,7 @@ type ReadInput struct {
 func (e *Env) NewReadTool() tool.InvokableTool {
 	info := &schema.ToolInfo{
 		Name: "read",
-		Desc: "Reads a file. Works on both local and remote (SSH) machines.",
+		Desc: "Reads a file. Works on both local and remote (SSH) machines. If the path is a directory, it returns the directory structure instead.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"file_path": {
 				Type:     schema.String,
@@ -59,6 +60,22 @@ func (r *readTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 
 	if input.FilePath == "" {
 		return "", fmt.Errorf("file_path is required")
+	}
+
+	stat, err := r.env.Exec.Stat(ctx, input.FilePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to stat file %s: %w", input.FilePath, err)
+	}
+	if !stat.Exists {
+		return "", fmt.Errorf("file %s does not exist", input.FilePath)
+	}
+
+	if stat.IsDir {
+		out, serr, err := r.env.Exec.Exec(ctx, fmt.Sprintf("ls -la %s", ShellQuote(input.FilePath)), "", 10*time.Second)
+		if err != nil {
+			return "", fmt.Errorf("failed to list directory %s: %w\n%s", input.FilePath, err, serr)
+		}
+		return fmt.Sprintf("Path %s is a directory. Here is its structure:\n%s", input.FilePath, out), nil
 	}
 
 	content, err := r.env.Exec.ReadFile(ctx, input.FilePath)

@@ -35,6 +35,18 @@ type MCPServer struct {
 	Headers map[string]string `json:"headers,omitempty"`
 }
 
+// LangfuseConfig holds Langfuse telemetry credentials.
+type LangfuseConfig struct {
+	Host      string `json:"LANGFUSE_BASE_URL,omitempty"`
+	PublicKey string `json:"LANGFUSE_PUBLIC_KEY,omitempty"`
+	SecretKey string `json:"LANGFUSE_SECRET_KEY,omitempty"`
+}
+
+// TelemetryConfig holds optional observability integrations.
+type TelemetryConfig struct {
+	Langfuse *LangfuseConfig `json:"langfuse,omitempty"`
+}
+
 // Config represents the application configuration
 type Config struct {
 	Models        map[string]*ProviderConfig `json:"models"`
@@ -43,6 +55,7 @@ type Config struct {
 	MaxIterations int                        `json:"max_iterations,omitempty"`
 	SSHAliases    []SSHAlias                 `json:"ssh_aliases,omitempty"`
 	MCPServers    map[string]*MCPServer      `json:"mcp_servers,omitempty"`
+	Telemetry     *TelemetryConfig           `json:"telemetry,omitempty"`
 }
 
 // configFilePath returns the full path to the config file

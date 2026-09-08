@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   ArrowDownTrayIcon,
   ArrowTopRightOnSquareIcon,
@@ -119,6 +119,7 @@ export const GeneratedImageCard = memo(function GeneratedImageCard({
   const strings = useMemo(() => ({ ...DEFAULT_STRINGS, ...stringOverrides }), [stringOverrides])
   const [imageReady, setImageReady] = useState(false)
   const [imageFailed, setImageFailed] = useState(false)
+  const assetRef = useRef<HTMLImageElement | null>(null)
 
   useEffect(() => {
     setImageReady(false)
@@ -144,16 +145,18 @@ export const GeneratedImageCard = memo(function GeneratedImageCard({
       : {}),
   } as CSSProperties
 
-  const revealDecodedImage = (image: HTMLImageElement) => {
-    if (typeof image.decode !== 'function') {
-      setImageReady(true)
-      return
-    }
-    void image.decode().catch(() => undefined).then(() => {
-      // A late settle must not reveal an asset whose src has since changed.
-      if (image.getAttribute('src') === imageSrc) setImageReady(true)
-    })
-  }
+  // The delegated React onLoad can silently miss a load that completes around
+  // commit (cached/blob assets, event-delegation quirks) and the card then
+  // sticks on "loading" forever. Listen on the node itself so every load is
+  // delivered, and settle immediately for an asset that is already decoded.
+  useEffect(() => {
+    const el = assetRef.current
+    if (!isSuccess || !imageSrc || !el) return
+    const reveal = () => revealWhenDecoded(el, imageSrc, () => setImageReady(true))
+    el.addEventListener('load', reveal)
+    if (el.complete && el.naturalWidth > 0) reveal()
+    return () => { el.removeEventListener('load', reveal) }
+  }, [imageSrc, isSuccess])
 
   return (
     <>
@@ -167,10 +170,11 @@ export const GeneratedImageCard = memo(function GeneratedImageCard({
       >
         {isSuccess && imageSrc ? (
           <img
+            ref={assetRef}
             className="jcode-generated-image__asset"
             src={imageSrc}
             alt={alt || title || strings.succeeded}
-            onLoad={(event) => revealDecodedImage(event.currentTarget)}
+            onLoad={(event) => revealWhenDecoded(event.currentTarget, imageSrc, () => setImageReady(true))}
             onError={() => setImageFailed(true)}
           />
         ) : null}
@@ -267,6 +271,18 @@ export const GeneratedImageCard = memo(function GeneratedImageCard({
     </>
   )
 })
+
+function revealWhenDecoded(image: HTMLImageElement, expectedSrc: string, reveal: () => void): void {
+  const settle = () => {
+    // A late decode must not reveal an asset whose src has since changed.
+    if (image.getAttribute('src') === expectedSrc) reveal()
+  }
+  if (typeof image.decode !== 'function') {
+    settle()
+    return
+  }
+  void image.decode().catch(() => undefined).then(settle)
+}
 
 function ImageAction({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
   return (

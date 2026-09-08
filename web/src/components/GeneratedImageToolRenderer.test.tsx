@@ -81,11 +81,12 @@ const generatedArtifact = {
   height: 1024,
 }
 
-// Shared CI runners occasionally starve workers long enough that the default
-// 1s findByRole window expires even though the synchronous reveal path is
-// intact (once seen on ubuntu-latest: 24s jsdom environment setup). Generous
-// explicit windows keep the assertion about behavior, not runner speed.
+// Shared CI runners occasionally starve workers long enough that both the
+// default 1s findByRole window and even vitest's 5s per-test ceiling expired
+// while waiting for the preview button (seen on ubuntu-latest). Keep explicit
+// headroom on every layer so assertions stay about behavior, not runner speed.
 const SLOW_RUNNER_WAIT = { timeout: 5000 }
+const SLOW_RUNNER_TEST_TIMEOUT = 20000
 
 async function readyGeneratedImage() {
   renderImage({
@@ -156,7 +157,7 @@ describe('GeneratedImageToolRenderer visibility', () => {
     expect(screen.queryByRole('button', { name: 'Download image' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Open Artifact' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Reveal in folder' })).toBeNull()
-  })
+  }, SLOW_RUNNER_TEST_TIMEOUT)
 
   it('opens a decoded desktop image with the hardened artifact action', async () => {
     mocks.desktop = true
@@ -169,7 +170,7 @@ describe('GeneratedImageToolRenderer visibility', () => {
       'image-renderer-task', generatedArtifact.id,
     ))
     expect(browserOpen).not.toHaveBeenCalled()
-  })
+  }, SLOW_RUNNER_TEST_TIMEOUT)
 
   it('shows a localized error when the desktop viewer cannot open the image', async () => {
     mocks.desktop = true
@@ -179,5 +180,5 @@ describe('GeneratedImageToolRenderer visibility', () => {
     fireEvent.click(preview)
 
     expect(await screen.findByText('The image could not be opened in a new window.')).toBeTruthy()
-  })
+  }, SLOW_RUNNER_TEST_TIMEOUT)
 })

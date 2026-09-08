@@ -75,6 +75,8 @@ describe('SettingsView', () => {
       'General',
       'Cloud',
       'Appearance',
+      'Agent',
+      'Review',
       'Providers',
       'MCP Servers',
       'Skills',

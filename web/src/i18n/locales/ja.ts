@@ -370,6 +370,8 @@ export default {
     title: '設定',
     tabs: {
       general: '一般',
+      agent: 'エージェント',
+      review: 'レビュー',
       cloud: 'クラウド',
       appearance: '外観',
       providers: 'プロバイダー',

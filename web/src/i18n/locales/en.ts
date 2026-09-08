@@ -416,6 +416,8 @@ export default {
     title: 'Settings',
     tabs: {
       general: 'General',
+      agent: 'Agent',
+      review: 'Review',
       cloud: 'Cloud',
       appearance: 'Appearance',
       providers: 'Providers',

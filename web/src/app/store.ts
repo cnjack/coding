@@ -1593,6 +1593,8 @@ export type SettingsTab =
   | 'general'
   | 'cloud'
   | 'appearance'
+  | 'agent'
+  | 'review'
   | 'providers'
   | 'mcp'
   | 'skills'

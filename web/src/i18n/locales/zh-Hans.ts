@@ -399,6 +399,8 @@ export default {
     title: '设置',
     tabs: {
       general: '通用',
+      agent: 'Agent',
+      review: '审阅',
       cloud: '云',
       appearance: '外观',
       providers: '服务商',

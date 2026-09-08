@@ -371,6 +371,8 @@ export default {
     title: '設定',
     tabs: {
       general: '一般',
+      agent: 'Agent',
+      review: '審閱',
       cloud: '雲端',
       appearance: '外觀',
       providers: '服務商',

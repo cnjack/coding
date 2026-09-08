@@ -370,6 +370,8 @@ export default {
     title: '설정',
     tabs: {
       general: '일반',
+      agent: '에이전트',
+      review: '검토',
       cloud: '클라우드',
       appearance: '모양',
       providers: '프로바이더',

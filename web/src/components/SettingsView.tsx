@@ -8,7 +8,8 @@
  * Tabs: General (server/token/auto-approve/language + the M19 cloud-sync
  * default), Cloud (M18: account/connection state, auto-connect, pairing
  * approvals, device-code login and logout — moved out of the
- * CloudBadge popover), Providers (full CRUD + catalog + advanced config),
+ * CloudBadge popover), Agent (tool discovery), Review (Auto approval review),
+ * Providers (full CRUD + catalog + advanced config),
  * Models (state/favorites/effort), MCP (servers CRUD + OAuth login), Skills
  * (enable/disable), Appearance (theme picker), Memory (status + consolidation),
  * Browser (config + site permissions), Computer (config + app permissions +
@@ -137,6 +138,8 @@ const TABS: { id: TabId; Icon: React.ComponentType<{ className?: string }> }[] =
   { id: 'general', Icon: Cog6ToothIcon },
   { id: 'cloud', Icon: CloudIcon },
   { id: 'appearance', Icon: SwatchIcon },
+  { id: 'agent', Icon: BoltIcon },
+  { id: 'review', Icon: ShieldCheckIcon },
   { id: 'providers', Icon: CpuChipIcon },
   { id: 'mcp', Icon: ServerStackIcon },
   { id: 'skills', Icon: SparklesIcon },
@@ -301,6 +304,8 @@ export function SettingsView() {
             {tab === 'general' && <GeneralTab />}
             {tab === 'cloud' && <CloudTab />}
             {tab === 'appearance' && <AppearanceTab />}
+            {tab === 'agent' && <AgentTab />}
+            {tab === 'review' && <ReviewTab />}
             {tab === 'providers' && <ProvidersTab />}
             {tab === 'mcp' && <MCPTab />}
             {tab === 'skills' && <SkillsTab />}
@@ -1967,11 +1972,6 @@ function GeneralTab() {
           ))}
         </select>
       </div>
-
-      {/* Agent behavior and approval review (Auto session mode) */}
-      <ToolSearchSection />
-      <ApprovalReviewSection />
-
     </div>
   )
 }
@@ -2033,6 +2033,28 @@ function VersionUpdateRow() {
       >
         {t('update.checkButton')}
       </button>
+    </div>
+  )
+}
+
+function AgentTab() {
+  const { t } = useTranslation()
+
+  return (
+    <div className="space-y-5">
+      <h3 className={SECTION_TITLE}>{t('settings.tabs.agent')}</h3>
+      <ToolSearchSection />
+    </div>
+  )
+}
+
+function ReviewTab() {
+  const { t } = useTranslation()
+
+  return (
+    <div className="space-y-5">
+      <h3 className={SECTION_TITLE}>{t('settings.tabs.review')}</h3>
+      <ApprovalReviewSection />
     </div>
   )
 }
@@ -2167,7 +2189,7 @@ function ApprovalReviewSection() {
 
   // The reviewer model picker offers the same enabled-model list as the chat
   // picker and the small_model role picker, so a model is chosen the same way
-  // everywhere. This section lives in the General tab, which does not load the
+  // everywhere. This section lives in the Review tab, which does not load the
   // list itself — refresh it here rather than depend on the Providers tab
   // having been opened first.
   const pickerProviders = useAppSelector((s) => s.model.providers)

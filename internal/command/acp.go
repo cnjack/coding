@@ -435,6 +435,10 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 		pwd = util.GetWorkDir()
 	}
 
+	// Seed the shared managed deny-read policy from the user-owned global
+	// config (never project-mergeable; reloads only strengthen it).
+	tools.InitManagedDenyRead(cfg)
+
 	// Apply project-level config overlay (walk-up .jcode/config.json + mcp.json).
 	config.ApplyProjectOverlay(cfg, pwd)
 
@@ -1282,6 +1286,10 @@ func (a *acpAgent) LoadSession(ctx context.Context, params acp.LoadSessionReques
 		pwd = util.GetWorkDir()
 	}
 
+	// Seed the shared managed deny-read policy from the user-owned global
+	// config (never project-mergeable; reloads only strengthen it).
+	tools.InitManagedDenyRead(cfg)
+
 	// Apply project-level config overlay (walk-up .jcode/config.json + mcp.json).
 	config.ApplyProjectOverlay(cfg, pwd)
 
@@ -1363,6 +1371,10 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 	if pwd == "" {
 		pwd = util.GetWorkDir()
 	}
+
+	// Seed the shared managed deny-read policy from the user-owned global
+	// config (never project-mergeable; reloads only strengthen it).
+	tools.InitManagedDenyRead(cfg)
 
 	// Apply project-level config overlay (walk-up .jcode/config.json + mcp.json).
 	config.ApplyProjectOverlay(cfg, pwd)

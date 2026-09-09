@@ -34,21 +34,36 @@ func NewMemoryLoader(cfg MemoryConfig) *MemoryLoader {
 }
 
 // Load loads and merges multi-level AGENTS.md files:
-//  1. ~/.jcode/AGENTS.md (global)
+//  1. ~/.jcode/AGENTS.md (global — user-owned, always loaded)
 //  2. Walk-up from git root → pwd: each directory's AGENTS.md (root first,
 //     pwd last). This lets monorepo roots define shared instructions while
 //     sub-packages add their own. When not in a git repo, only pwd is checked.
 //  3. {pwd}/AGENTS.local.md (local, expected gitignored)
+//
+// SECURITY: layers 2 and 3 are project content and load only when the project
+// is trusted (config.ProjectInstructionsAllowed). An untrusted clone — the
+// default for new/unknown projects — must not inject instructions into the
+// system prompt. Trust comes from an explicit user decision recorded in
+// ~/.jcode/project_trust.json (see `jcode trust`) or the
+// JCODE_AGENTS_TRUST_PROJECT=1 opt-in; repository content can never
+// self-authorize. Global instructions stay unaffected.
 //
 // Each file's @include directives are resolved recursively.
 // The merged result is truncated to MaxTotalChars.
 func (m *MemoryLoader) Load(pwd string) (string, error) {
 	var sections []string
 
-	// 1. Global AGENTS.md
+	// 1. Global AGENTS.md (user-owned; not project content)
 	globalPath := filepath.Join(config.ConfigDir(), "AGENTS.md")
 	if content, err := m.loadFile(globalPath); err == nil && content != "" {
 		sections = append(sections, "<!-- global agents.md -->\n"+content)
+	}
+
+	// 2 + 3. Project AGENTS.md layers, gated on project trust.
+	decision := config.ProjectInstructionsAllowed(pwd)
+	if !decision.Allowed {
+		m.logSkippedProjectInstructions(pwd, decision)
+		return mergeSections(sections, m.cfg.MaxTotalChars)
 	}
 
 	// 2. Walk-up project AGENTS.md (git root → pwd, case-insensitive lookup)
@@ -68,6 +83,34 @@ func (m *MemoryLoader) Load(pwd string) (string, error) {
 		sections = append(sections, "<!-- local agents.md -->\n"+content)
 	}
 
+	return mergeSections(sections, m.cfg.MaxTotalChars)
+}
+
+// logSkippedProjectInstructions records (audit log) that project instructions
+// existed but were excluded because the project is untrusted. The log fires
+// only when the working directory actually contains an AGENTS.md, so quiet
+// projects stay quiet.
+func (m *MemoryLoader) logSkippedProjectInstructions(pwd string, decision config.ProjectTrustDecision) {
+	if pwd == "" {
+		return
+	}
+	if HasAgentsMd(pwd) == "" {
+		return
+	}
+	root := decision.Root
+	if root == "" {
+		root = pwd
+	}
+	config.Logger().Printf(
+		"[security] project AGENTS.md skipped for untrusted project %s (root %s); run `jcode trust %s` to load it, or set JCODE_AGENTS_TRUST_PROJECT=1",
+		pwd, root, root,
+	)
+}
+
+// mergeSections joins the collected sections and enforces the total character
+// limit. Extracted so the trusted and untrusted paths share one truncation
+// contract.
+func mergeSections(sections []string, maxTotalChars int) (string, error) {
 	if len(sections) == 0 {
 		return "", nil
 	}
@@ -75,8 +118,8 @@ func (m *MemoryLoader) Load(pwd string) (string, error) {
 	merged := strings.Join(sections, "\n\n---\n\n")
 
 	// Enforce total character limit.
-	if len(merged) > m.cfg.MaxTotalChars {
-		merged = merged[:m.cfg.MaxTotalChars] + "\n... (agents.md content truncated)"
+	if len(merged) > maxTotalChars {
+		merged = merged[:maxTotalChars] + "\n... (agents.md content truncated)"
 	}
 
 	return merged, nil

@@ -18,6 +18,8 @@ nav_order: 8
 | `jcode version` | Show version, build time, and commit |
 | `jcode update` | Update jcode to the latest version |
 | `jcode sessions` | List recorded sessions for this project |
+| `jcode trust [path]` | Trust a project so its `AGENTS.md` instructions load (`--status` to inspect) |
+| `jcode untrust [path]` | Revoke project trust (project `AGENTS.md` stops loading) |
 | `jcode mcp add <name> <url>` | Add an MCP server |
 | `jcode mcp list` | List configured MCP servers |
 | `jcode mcp login <name>` | Authenticate an existing http/sse MCP server via OAuth |

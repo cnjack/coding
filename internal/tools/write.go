@@ -60,6 +60,13 @@ func (w *writeTool) InvokableRun(ctx context.Context, argumentsInJSON string, op
 	}
 	input.FilePath = w.env.ResolvePath(input.FilePath)
 
+	// Managed deny-read policy: denied paths are off-limits to writes too —
+	// writing (and the read-back/conflict detection below) would leak or
+	// corrupt protected content.
+	if err := w.env.checkDenyRead("write", input.FilePath); err != nil {
+		return "", err
+	}
+
 	// File size limit.
 	if len(input.Content) > MaxWriteFileSize {
 		return "", fmt.Errorf("content too large (%d bytes, max %d)", len(input.Content), MaxWriteFileSize)

@@ -94,6 +94,12 @@ func (g *globTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 		searchPath = g.env.ResolvePath(searchPath)
 	}
 
+	// Managed deny-read policy: denied trees cannot be enumerated either —
+	// file names under a denied directory are themselves sensitive.
+	if err := g.env.checkDenyRead("glob", searchPath); err != nil {
+		return "", err
+	}
+
 	limit := globDefaultLimit
 	if input.Limit > 0 {
 		limit = input.Limit

@@ -580,6 +580,11 @@ func (s *interactiveState) reloadMCP() {
 		}
 		return
 	}
+	// Hot-reload: re-merge the managed deny-read rules from the fresh global
+	// config. Union semantics — newly added rules apply immediately; removed
+	// rules stay in force for this session (managed deny-read outranks later
+	// relaxed settings).
+	tools.InitManagedDenyRead(latest)
 	config.ApplyProjectOverlay(latest, s.pwd)
 	s.cfg = latest
 	rawMCPTools, statuses := tools.LoadMCPTools(s.ctx, providertools.EffectiveMCPServers(latest))
@@ -1418,6 +1423,11 @@ func RunInteractive(prompt, resumeUUID, agentName string, unsafe bool) error {
 	pwd := util.GetWorkDir()
 	platform := util.GetSystemInfo()
 	envInfo := util.CollectEnvInfo(pwd)
+
+	// Seed the shared managed deny-read policy from the user-owned global
+	// config before any project overlay — deny rules are never project-
+	// mergeable, and runtime reloads only strengthen the live policy.
+	tools.InitManagedDenyRead(cfg)
 
 	// Apply project-level config overlay (walk-up .jcode/config.json + mcp.json).
 	config.ApplyProjectOverlay(cfg, pwd)

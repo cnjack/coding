@@ -157,6 +157,13 @@ func (g *grepTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 		return "", fmt.Errorf("path is required")
 	}
 
+	// Managed deny-read policy: the search root must be readable. Checking
+	// before dispatch means content under a denied tree is never streamed
+	// back, in every approval mode and on both local and remote executors.
+	if err := g.env.checkDenyRead("grep", g.env.ResolvePath(input.Path)); err != nil {
+		return "", err
+	}
+
 	maxResults := grepDefaultMax
 	if input.MaxResults > 0 {
 		maxResults = input.MaxResults

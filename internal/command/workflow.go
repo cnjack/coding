@@ -239,6 +239,8 @@ func buildFlowSpawn(ctx context.Context, pwd string) (flow.SpawnFunc, func(strin
 	factory := internalmodel.NewModelFactory(cfg, chatModel)
 
 	platform := utils.GetSystemInfo()
+	// Shared managed deny-read policy (same object as every other Env).
+	tools.InitManagedDenyRead(cfg)
 	env := tools.NewEnv(pwd, platform)
 
 	spawn := tools.NewFlowSpawn(tools.FlowSpawnDeps{

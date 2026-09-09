@@ -470,6 +470,17 @@ type Config struct {
 	Team          *TeamConfig           `json:"team,omitempty"`
 	Memory        *MemoryConfig         `json:"memory,omitempty"`
 
+	// DenyRead holds managed deny-read rules: path patterns whose contents the
+	// agent may not read via read/grep/glob (nor reach through execute, edit,
+	// or write). Rules are USER-MANAGED policy: they load from the global
+	// config only and are NEVER merged from project config (see
+	// mergeProjectFields) — a repository must not be able to add, relax, or
+	// remove them. Once loaded into a session, the rules stay enforced across
+	// approval-mode changes, full access, config hot reloads, resume, and
+	// remote (SSH/Docker) switches; they propagate to subagents and teammates
+	// unchanged (see internal/tools/readpolicy.go).
+	DenyRead []DenyReadRule `json:"deny_read,omitempty"`
+
 	// AutoApprove sets the default approval mode to auto on startup.
 	//
 	// Deprecated: superseded by DefaultMode; still honored as a fallback when
@@ -999,6 +1010,22 @@ type TeamConfig struct {
 	MaxTeammates  int `json:"max_teammates,omitempty"`   // max teammates per team (default 5)
 	MailboxPollMs int `json:"mailbox_poll_ms,omitempty"` // mailbox poll interval in ms (default 500)
 	MessageCap    int `json:"message_cap,omitempty"`     // max messages in UI per teammate (default 50)
+}
+
+// DenyReadRule is one managed deny-read rule. A rule denies tool access
+// (read/grep/glob/execute/edit/write) to every path it matches:
+//
+//   - An absolute directory path denies the directory and everything under it
+//     (e.g. "/home/user/.ssh").
+//   - An absolute file path denies exactly that file (e.g. "/etc/shadow").
+//   - A pattern containing glob metacharacters (* ? [) matches each path
+//     segment via filepath.Match semantics (e.g. "/srv/*/secrets.env").
+//
+// Reason is free-form and appears in tool errors and audit records so the
+// agent (and the user) can see why a path is blocked.
+type DenyReadRule struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // GetProviders returns the effective provider map, merging legacy Models field into Providers.

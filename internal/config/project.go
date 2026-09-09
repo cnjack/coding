@@ -289,6 +289,10 @@ func mergeProjectFields(base, overlay *Config) {
 	//   - Browser / Computer (capability toggles + preapproved permission lists —
 	//     a project enabling computer-use and auto-approving its own app would
 	//     bypass the user's approval policy, same escalation class as AutoApprove)
+	//   - DenyRead (managed deny-read rules — user-managed policy that must stay
+	//     enforced regardless of repository content; a project config must not
+	//     be able to add rules that brick the workspace nor remove rules the
+	//     user relies on to protect secrets)
 	// A project config that sets these fields has them silently ignored.
 }
 

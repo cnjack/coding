@@ -132,6 +132,15 @@ func (et *executeTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 	if input.Command == "" {
 		return "", toolErrf("missing_param", missingParamHint("command"), "command is required")
 	}
+
+	// Managed deny-read policy: refuse commands that reference a denied path
+	// (lexical check, see DenyReadPolicy.CheckCommand). Runs before the plan
+	// gate and before background dispatch so neither mode nor backgrounding
+	// can smuggle a read of a denied path.
+	if err := et.env.checkDenyReadCommand("execute", input.Command); err != nil {
+		return "", err
+	}
+
 	if et.planOnly {
 		if input.Background {
 			return "", toolErrf(

@@ -83,6 +83,12 @@ func (r *readTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 	}
 	input.FilePath = r.env.ResolvePath(input.FilePath)
 
+	// Managed deny-read policy: enforced before any stat/read so denied paths
+	// neither reveal existence nor contents. Holds in every approval mode.
+	if err := r.env.checkDenyRead("read", input.FilePath); err != nil {
+		return "", err
+	}
+
 	// Binary detection by extension (before reading content).
 	if detectBinaryByExtension(input.FilePath) {
 		return "", fmt.Errorf("cannot read binary file %s (detected by extension %s)",

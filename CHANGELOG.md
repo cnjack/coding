@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Untrusted projects no longer supply project-level `AGENTS.md` instructions.** New/unknown projects (including fresh clones) are untrusted by default: the walk-up `AGENTS.md` chain and `AGENTS.local.md` are excluded from the system prompt, while the user-owned global `~/.jcode/AGENTS.md` keeps loading. Trust is an explicit user decision persisted outside the repository (`jcode trust` / `jcode untrust`, stored in `~/.jcode/project_trust.json`) or the `JCODE_AGENTS_TRUST_PROJECT=1` opt-in — repository content can never self-authorize. Behavior is identical across TUI, Web, Desktop, and ACP, and skipped instructions are audit-logged.
+- **Managed deny-read rules (`deny_read`).** A new user-managed global config list blocks `read`/`grep`/`glob`/`execute` (and `edit`/`write`, so denied content cannot leak through diffs) from matched paths, with exact/dir-prefix/`filepath.Match`-glob semantics and symlink resolution. Rules are never mergeable from project config, are shared by every Env (subagents, teammates, workflows, remote SSH/Docker sessions inherit the same policy object and cannot gain higher read permission), and — once a session is running — stay enforced across approval-mode changes, Full Access, config hot-reloads, and resume; additions apply immediately, removals require a restart. Denied calls return a stable `path_denied_by_policy` error and are recorded under `[security]` in the debug log.
+
 ### Added
 - **Unified Provider account sign-in.** Settings and first-run setup can now authenticate OpenAI through ChatGPT/Codex, xAI through Grok, and GitHub Copilot through one device-code account flow, while preserving API-key providers. Providers bind to a default or explicit local account and expose connected, reauthentication, and multi-account management states.
 - GitHub Copilot requests keep one stable session interaction while classifying tool continuations and delegated agents as agent-initiated, avoiding accidental extra premium interactions.

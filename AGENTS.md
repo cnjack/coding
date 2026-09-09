@@ -207,6 +207,13 @@ Checklist before publish:
 
 ---
 
+## Security: project trust & managed deny-read
+
+- **Project `AGENTS.md` is gated on trust.** `internal/prompts.MemoryLoader.Load` loads the global `~/.jcode/AGENTS.md` always, but the project walk-up chain + `AGENTS.local.md` only for trusted projects (`internal/config/trust.go`: `~/.jcode/project_trust.json`, `jcode trust`/`untrust`, or `JCODE_AGENTS_TRUST_PROJECT=1`). Untrusted is the default — a fresh clone must not inject system-prompt content. Tests that assert project AGENTS.md content must opt in (`t.Setenv("JCODE_AGENTS_TRUST_PROJECT", "1")` + isolated HOME).
+- **Managed deny-read rules are user-owned policy.** Global config `deny_read` (`internal/tools/readpolicy.go`) is enforced inside tool execution (below approval — no mode can bypass it), never merged from project config, and shared by every `*Env` via one process-wide policy object (subagents/teammates/workflows/remote switch inherit; runtime updates are strengthen-only). New file-access tools should call `env.checkDenyRead(tool, path)` (or `checkDenyReadCommand` for shell) right after path resolution and return its stable `path_denied_by_policy` error.
+
+---
+
 ## Cloud relay (`internal/cloud/`)
 
 jcode can log into jcloud (device code) and be remote-controlled via an

@@ -249,3 +249,27 @@ func TestMergeMCPServer_DisabledOnlyOneWay(t *testing.T) {
 		t.Error("project must not re-enable a globally disabled server")
 	}
 }
+
+// TestMergeProjectConfig_DenyReadNeverMerged verifies managed deny-read rules
+// are user-managed policy: a project config can neither remove existing rules
+// (to expose secrets) nor add its own (to brick the workspace).
+func TestMergeProjectConfig_DenyReadNeverMerged(t *testing.T) {
+	base := &Config{
+		DenyRead: []DenyReadRule{{Path: "/home/user/.ssh", Reason: "credentials"}},
+	}
+	overlay := &Config{
+		DenyRead: []DenyReadRule{{Path: "/"}},
+	}
+	MergeProjectConfig(base, overlay)
+
+	if len(base.DenyRead) != 1 || base.DenyRead[0].Path != "/home/user/.ssh" {
+		t.Fatalf("DenyRead = %+v, want the single user-managed rule unchanged", base.DenyRead)
+	}
+
+	// Also with no base rules: project deny_read stays ignored.
+	empty := &Config{}
+	MergeProjectConfig(empty, overlay)
+	if len(empty.DenyRead) != 0 {
+		t.Fatalf("project deny_read must not be merged, got %+v", empty.DenyRead)
+	}
+}

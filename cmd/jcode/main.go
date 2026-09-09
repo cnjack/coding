@@ -56,6 +56,8 @@ func main() {
 		command.NewLoginCmd(),
 		command.NewLogoutCmd(),
 		command.NewCloudCmd(),
+		command.NewTrustCmd(),
+		command.NewUntrustCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {

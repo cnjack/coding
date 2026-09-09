@@ -73,6 +73,14 @@ type Env struct {
 	// ResetToLocal can restore the correct local executor after SSH.
 	origExec Executor
 	origPwd  string
+
+	// DenyRead is the shared managed deny-read policy (see readpolicy.go).
+	// Every Env — including clones for subagents and fresh Envs for teammates
+	// — points at the SAME process-wide policy object, so denials apply
+	// identically everywhere and a child agent can never hold a weaker rule
+	// set (higher read permission) than its parent. Nil behaves as an empty
+	// (allow-all) policy; NewEnv always sets it.
+	DenyRead *DenyReadPolicy
 }
 
 // NewEnv creates a local Env.
@@ -92,6 +100,9 @@ func NewEnv(pwd, platform string) *Env {
 		FileTracker: NewFileTracker(nil),
 		origExec:    exec,
 		origPwd:     pwd,
+		// Shared managed deny-read policy: same object for the whole process,
+		// so runtime strengthen is visible to every Env immediately.
+		DenyRead: ManagedDenyRead(),
 	}
 }
 
@@ -162,6 +173,9 @@ func (e *Env) CloneForSubagent() *Env {
 		FileTracker: e.FileTracker,
 		Depth:       e.Depth + 1,
 		Browser:     e.Browser,
+		// Deny rules propagate unchanged: a subagent shares the parent's
+		// policy object and must never inherit a higher read permission.
+		DenyRead: e.DenyRead,
 		// The Manager is shared, but the subagent's session (and therefore its
 		// app allowlist) starts empty: a grant the user gave the parent for one
 		// app is not a grant to every subagent it spawns.

@@ -195,6 +195,11 @@ func TestReminderEnvRefreshDisabled(t *testing.T) {
 // AGENTS.md changed on disk mid-session: baseline round is silent, the change
 // round injects the new content, and the following round does not repeat it.
 func TestReminderAgentsMdReload(t *testing.T) {
+	// Project AGENTS.md loads only for trusted projects — this test asserts
+	// reload behavior of project instructions, so opt in explicitly.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("JCODE_AGENTS_TRUST_PROJECT", "1")
+
 	pwd := t.TempDir()
 	agentsPath := filepath.Join(pwd, "AGENTS.md")
 	if err := os.WriteFile(agentsPath, []byte("rule v1"), 0o644); err != nil {

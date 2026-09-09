@@ -457,10 +457,17 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			startMode = mode.Parse(modeStr)
 		}
 		if exec == nil && !scratch { // project config overlay (project-bound local tasks only)
+			// Seed the shared managed deny-read policy from the user-owned
+			// global config before the project overlay (deny rules are never
+			// project-mergeable; refreshes only strengthen the live policy).
+			tools.InitManagedDenyRead(taskCfg)
 			config.ApplyProjectOverlay(taskCfg, taskPwd)
 		} else {
 			// Remote and scratch tasks skip project config. Environment variables
-			// are user-owned process state and still apply to both.
+			// are user-owned process state and still apply to both. Deny rules
+			// still seed from the global config — a remote workspace must not
+			// carry a weaker rule set than local.
+			tools.InitManagedDenyRead(taskCfg)
 			config.ApplyEnvOverlay(taskCfg)
 		}
 		// Fresh execution environment for this task only.
@@ -788,6 +795,9 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			if loadErr != nil {
 				return nil, fmt.Errorf("reload agent config: %w", loadErr)
 			}
+			// Hot-reload: re-merge managed deny-read rules from the fresh
+			// config (union — additions apply live, removals do not).
+			tools.InitManagedDenyRead(agentCfg)
 			if exec == nil && !scratch {
 				config.ApplyProjectOverlay(agentCfg, taskPwd)
 			} else {

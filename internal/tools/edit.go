@@ -125,6 +125,13 @@ func (e *editTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 	}
 	input.FilePath = e.env.ResolvePath(input.FilePath)
 
+	// Managed deny-read policy: an edit of a denied file would read its old
+	// content for matching and echo it back through diffs/errors — deny the
+	// whole operation.
+	if err := e.env.checkDenyRead("edit", input.FilePath); err != nil {
+		return "", err
+	}
+
 	// Validate mutual exclusivity.
 	if len(input.Edits) > 0 && input.OldString != "" {
 		return "", fmt.Errorf("edits and old_string are mutually exclusive; use one or the other")

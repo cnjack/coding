@@ -71,7 +71,7 @@ nav_order: 8
 | **F1** / **?** | Open keyboard shortcuts help (`?` when the input is empty) |
 | **Ctrl+C** | Exit (press once for confirmation, twice to force) |
 | **Ctrl+T** | Toggle team coordinator panel |
-| **Ctrl+Y** | Copy last assistant message to clipboard |
+| **Ctrl+Y** | Copy last assistant response to clipboard |
 | **Shift+Up/Down** | Switch between teammate views |
 | **Up/Down** | Navigate prompt history |
 | **Esc** | Clear selection / exit teammate view / cancel dialog |
@@ -89,6 +89,7 @@ Type these in the TUI input area:
 | `/ssh` | Open SSH connection wizard |
 | `/resume` | Resume a previous session |
 | `/compact` | Compact conversation context |
+| `/copy` | Copy from the current response via a target picker: full response, an individual code block, or a blockquote (fences and language/filename chrome are never copied) |
 | `/goal` | Set a persistent objective the agent works toward ([Goals](goal.html)) |
 | `/memory` | Show project memory; `/memory sync` to distill, `/memory clear` to wipe ([Project Memory](overview/learned-memory.html)) |
 | `/bg` | Show background tasks |

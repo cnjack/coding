@@ -110,6 +110,15 @@ func (i sshAliasItem) Title() string       { return i.title }
 func (i sshAliasItem) Description() string { return i.desc }
 func (i sshAliasItem) FilterValue() string { return i.title }
 
+// copyItem implements list.Item for the /copy target picker.
+type copyItem struct{ target copyTarget }
+
+func (i copyItem) Title() string       { return i.target.label }
+func (i copyItem) Description() string { return i.target.detail }
+func (i copyItem) FilterValue() string {
+	return i.target.label + " " + i.target.detail + " " + i.target.lang + " " + i.target.filename
+}
+
 // channelItem for the channel management picker
 type channelItem struct {
 	title string

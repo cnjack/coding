@@ -66,6 +66,7 @@ export { Suggestions } from './components/Suggestions.js'
 export type { SuggestionItem, SuggestionsProps } from './components/Suggestions.js'
 export { ExportButton } from './components/ExportButton.js'
 export { QuoteSelection, formatQuote } from './components/QuoteSelection.js'
+export type { QuoteSelectionProps } from './components/QuoteSelection.js'
 export type { ToolCallCardProps, ToolCallCardSlots } from './components/ToolCallCard.js'
 export { TaskList, RuntimeTaskList } from './components/TaskList.js'
 export type {
@@ -84,6 +85,12 @@ export type {
 
 // Markdown pipeline (same renderer Message uses).
 export { renderMarkdown } from './lib/markdown.js'
+
+// Unified copy-target model + clipboard helper (shared with the TUI /copy
+// picker semantics: full response / code block / blockquote).
+export { analyzeCopyTargets } from './lib/copyTargets.js'
+export type { CopyTarget, CopyTargetKind } from './lib/copyTargets.js'
+export { copyText } from './lib/clipboard.js'
 
 // Re-export the core types + primitives so consumers have a single import.
 export type {

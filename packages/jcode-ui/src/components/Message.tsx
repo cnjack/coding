@@ -12,7 +12,7 @@
  * identity. System and WeChat messages keep a compact visible source label.
  */
 
-import { memo, useCallback, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   ArrowPathIcon,
@@ -21,9 +21,13 @@ import {
   HandThumbUpIcon,
   PencilSquareIcon,
   Square2StackIcon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline'
 import type { Message as MessageData } from 'jcode-ui-core'
 import { useRuntimeActions } from 'jcode-ui-core/runtime'
+import { copyText } from '../lib/clipboard.js'
+import { analyzeCopyTargets } from '../lib/copyTargets.js'
+import type { CopyTarget } from '../lib/copyTargets.js'
 import { bindCodeBlockCopy } from '../lib/markdown.js'
 import { useStreamingMarkdown } from '../lib/useStreamingMarkdown.js'
 import { AttachmentList } from './Attachment.js'
@@ -54,9 +58,15 @@ export interface MessageProps {
 
 export const Message = memo(function Message({ message, canEdit, showDuration = true, slots }: MessageProps) {
   const actions = useRuntimeActions()
-  const [copied, setCopied] = useState(false)
+  const [copyState, setCopyState] = useState<'idle' | 'ok' | 'failed'>('idle')
+  const [copyMenuOpen, setCopyMenuOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(message.content)
+
+  // Copy targets are computed from the message markdown (never rendered
+  // HTML), mirroring the TUI /copy picker: full response, individual code
+  // blocks, and blockquotes.
+  const copyTargets = useMemo(() => analyzeCopyTargets(message.content), [message.content])
 
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
@@ -87,15 +97,34 @@ export const Message = memo(function Message({ message, canEdit, showDuration = 
 
   const durationLabel = formatDuration(message.durationMs)
 
-  const copy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(message.content)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // clipboard unavailable
+  const doCopy = useCallback(async (target: CopyTarget) => {
+    const ok = await copyText(target.text)
+    setCopyState(ok ? 'ok' : 'failed')
+    setCopyMenuOpen(false)
+    setTimeout(() => setCopyState('idle'), 1500)
+  }, [])
+
+  // A plain message (no code blocks or quotes) copies the full text directly;
+  // anything richer opens the unified target menu.
+  const onCopyClick = useCallback(() => {
+    if (copyTargets.length > 1) {
+      setCopyMenuOpen((open) => !open)
+      setCopyState('idle')
+      return
     }
-  }, [message.content])
+    const full = copyTargets[0]
+    if (full) void doCopy(full)
+  }, [copyTargets, doCopy])
+
+  // Close the target menu on Escape while it is open.
+  useEffect(() => {
+    if (!copyMenuOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCopyMenuOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [copyMenuOpen])
 
   const startEdit = useCallback(() => {
     setDraft(message.content)
@@ -234,19 +263,50 @@ export const Message = memo(function Message({ message, canEdit, showDuration = 
             className="jcode-msg-actions flex items-center gap-0.5"
             data-has-feedback={message.feedback ? 'true' : undefined}
           >
-            <button
-              type="button"
-              onClick={copy}
-              title={copied ? 'Copied' : 'Copy'}
-              aria-label={copied ? 'Copied' : 'Copy'}
-              className="jcode-msg-action-btn flex h-5 w-5 cursor-pointer items-center justify-center rounded-[var(--jcode-radius-md)]"
-            >
-              {copied ? (
-                <CheckIcon className="h-3.5 w-3.5" style={{ color: 'var(--jcode-color-success)' }} />
-              ) : (
-                <Square2StackIcon className="h-3.5 w-3.5" />
+            <div className="relative inline-flex">
+              <button
+                type="button"
+                onClick={onCopyClick}
+                title={copyState === 'failed' ? 'Copy failed' : copyState === 'ok' ? 'Copied' : 'Copy'}
+                aria-label={copyState === 'failed' ? 'Copy failed' : copyState === 'ok' ? 'Copied' : 'Copy'}
+                aria-haspopup={copyTargets.length > 1 ? 'menu' : undefined}
+                aria-expanded={copyTargets.length > 1 ? copyMenuOpen : undefined}
+                data-copy-state={copyState}
+                className="jcode-msg-action-btn flex h-5 w-5 cursor-pointer items-center justify-center rounded-[var(--jcode-radius-md)]"
+              >
+                {copyState === 'ok' ? (
+                  <CheckIcon className="h-3.5 w-3.5" style={{ color: 'var(--jcode-color-success)' }} />
+                ) : copyState === 'failed' ? (
+                  <XMarkIcon className="h-3.5 w-3.5" style={{ color: 'var(--jcode-color-destructive, var(--jcode-color-error-fg))' }} />
+                ) : (
+                  <Square2StackIcon className="h-3.5 w-3.5" />
+                )}
+              </button>
+              {copyMenuOpen && (
+                <>
+                  <button
+                    type="button"
+                    aria-label="Close copy menu"
+                    className="jcode-copy-menu-backdrop"
+                    onClick={() => setCopyMenuOpen(false)}
+                  />
+                  <div className="jcode-copy-menu" role="menu" aria-label="Copy targets">
+                    {copyTargets.map((t) => (
+                      <button
+                        key={`${t.kind}-${t.index}`}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => void doCopy(t)}
+                        className="jcode-copy-menu__item"
+                      >
+                        <span className="jcode-copy-menu__label">{t.label}</span>
+                        <span className="jcode-copy-menu__detail">{t.detail}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
               )}
-            </button>
+            </div>
             {canEdit && (
               <button
                 type="button"

@@ -68,6 +68,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			var cmd tea.Cmd
 			m.themePicker, cmd = m.themePicker.Update(msg)
 			cmds = append(cmds, cmd)
+		case m.pickingCopy:
+			var cmd tea.Cmd
+			m.copyPicker, cmd = m.copyPicker.Update(msg)
+			cmds = append(cmds, cmd)
 		case m.sshStep == 3:
 			var cmd tea.Cmd
 			m.dirList, cmd = m.dirList.Update(msg)
@@ -500,6 +504,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			return m.handleThemePickerKey(msg, cmds)
 		}
 
+		if m.pickingCopy {
+			return m.handleCopyPickerKey(msg, cmds)
+		}
+
 		if m.pickingModel {
 			// When the list is actively filtering, let all keys pass through to the list
 			if m.modelPicker.FilterState() == list.Filtering {
@@ -860,6 +868,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 					if prompt == "/compact" {
 						return m.handleCompactInput(cmds)
+					}
+
+					if prompt == "/copy" {
+						return m.handleCopyInput(cmds)
 					}
 
 					if prompt == "/goal" || strings.HasPrefix(prompt, "/goal ") {

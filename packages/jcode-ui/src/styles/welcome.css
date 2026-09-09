@@ -124,10 +124,18 @@
   outline-offset: 1px;
 }
 
-/* Floating quote-selection button (portal to body). */
-.jcode-quote-btn {
+/* Floating quote/copy selection buttons (portal to body). The group is the
+ * fixed-position anchor; buttons flow inline inside it. */
+.jcode-quote-btn-group {
   position: fixed;
   transform: translate(-50%, calc(-100% - 6px));
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  z-index: var(--jcode-z-toast);
+  animation: jcode-fade-up var(--jcode-duration-fast) var(--jcode-ease-out) both;
+}
+.jcode-quote-btn {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
@@ -140,10 +148,16 @@
   padding: 0.25rem 0.65rem;
   cursor: pointer;
   box-shadow: var(--jcode-shadow-lg);
-  z-index: var(--jcode-z-toast);
-  animation: jcode-fade-up var(--jcode-duration-fast) var(--jcode-ease-out) both;
 }
 .jcode-quote-btn:hover {
   border-color: var(--jcode-accent-border);
   background: var(--jcode-accent-wash-soft);
+}
+.jcode-quote-btn[data-copy-feedback='failed'] {
+  color: var(--jcode-color-destructive, var(--jcode-color-error-fg));
+  border-color: var(--jcode-color-destructive, var(--jcode-color-error-fg));
+}
+.jcode-quote-btn[data-copy-feedback='ok'] {
+  color: var(--jcode-color-success);
+  border-color: var(--jcode-color-success);
 }

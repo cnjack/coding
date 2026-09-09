@@ -756,7 +756,7 @@ func (m Model) helpPanelView() string {
 	left = append(left, renderEntry("Ctrl+C", "Cancel / Quit"))
 	left = append(left, renderEntry("Ctrl+L", "Switch model"))
 	left = append(left, renderEntry("Shift+Tab", "Cycle mode: Ask for approval → Plan → Full access"))
-	left = append(left, renderEntry("Ctrl+Y", "Copy last response"))
+	left = append(left, renderEntry("Ctrl+Y", "Copy last response (/copy opens picker)"))
 	left = append(left, renderEntry("Ctrl+E", "Expand subagent output"))
 	left = append(left, renderEntry("Ctrl+T", "Full transcript (Ctrl+O in team mode)"))
 	left = append(left, renderEntry("Escape", "Interrupt agent / Back"))

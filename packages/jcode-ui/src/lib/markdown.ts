@@ -16,6 +16,7 @@ import { Marked } from 'marked'
 import type { TokenizerAndRendererExtension, Tokens } from 'marked'
 import hljs from 'highlight.js'
 import DOMPurify from 'dompurify'
+import { copyText } from './clipboard.js'
 
 // ─── Plugin hook table ───────────────────────────────────────────────────
 // Optional plugins register renderers here. `markdown.ts` never imports the
@@ -251,8 +252,10 @@ export function renderMarkdown(text: string): string {
 /**
  * Attach one delegated click handler that powers every `.jcode-codeblock__copy`
  * button under `root`. Call once on the container that holds rendered markdown
- * (idempotent per element). On click, copies the decoded `data-code` payload and
- * flips the label to "Copied" for 1.5s.
+ * (idempotent per element). On click, copies the decoded `data-code` payload via
+ * the shared clipboard helper (with execCommand fallback) and flips the label to
+ * "Copied" for 1.5s — or to "Copy failed" when both write paths are rejected,
+ * so a denied clipboard is never reported as success.
  *
  * @returns a cleanup function that removes the listener.
  */
@@ -274,11 +277,9 @@ export function bindCodeBlockCopy(root: HTMLElement): () => void {
     } catch {
       /* keep raw if it was not encoded */
     }
-    void navigator.clipboard?.writeText(code).then(
-      () => flashCopied(btn),
-      () => {
-        /* clipboard unavailable */
-      },
+    void copyText(code).then(
+      (ok) => (ok ? flashCopied(btn) : flashCopyFailed(btn)),
+      () => flashCopyFailed(btn),
     )
   }
 
@@ -297,5 +298,16 @@ function flashCopied(btn: HTMLElement): void {
   window.setTimeout(() => {
     btn.textContent = prev
     btn.removeAttribute('data-copied')
+  }, 1500)
+}
+
+function flashCopyFailed(btn: HTMLElement): void {
+  if (btn.getAttribute('data-copy-failed') === '1') return
+  const prev = btn.textContent
+  btn.setAttribute('data-copy-failed', '1')
+  btn.textContent = 'Copy failed'
+  window.setTimeout(() => {
+    btn.textContent = prev
+    btn.removeAttribute('data-copy-failed')
   }, 1500)
 }

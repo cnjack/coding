@@ -57,6 +57,10 @@ func (m *Model) View() tea.View {
 		return m.newView(m.themePickerView())
 	}
 
+	if m.pickingCopy {
+		return m.newView(m.copyPickerView())
+	}
+
 	if m.pickingSession {
 		return m.newView(m.sessionPickerView())
 	}

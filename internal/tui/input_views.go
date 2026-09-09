@@ -32,6 +32,7 @@ func (m Model) getAllCommands() []commandSuggestion {
 		{"/ssh", "SSH connection"},
 		{"/resume", "Resume a previous session"},
 		{"/compact", "Compress conversation context"},
+		{"/copy", "Copy response, code block or blockquote"},
 		{"/goal", "Set a persistent objective (auto-continues)"},
 		{"/bg", "List background tasks"},
 		{"/channel", "Manage channels (WeChat etc.)"},

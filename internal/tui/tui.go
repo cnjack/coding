@@ -172,9 +172,17 @@ type Model struct {
 	bgRunning   int              // count of running background tasks
 
 	// lastAssistantRawText stores the raw (unrendered) text of the last
-	// assistant response, used by Ctrl+Y to copy to clipboard without
-	// picking up structural elements like dividers.
+	// assistant response, used by Ctrl+Y and /copy to copy to clipboard
+	// without picking up structural elements like dividers.
 	lastAssistantRawText string
+
+	// ─── Copy picker state (/copy) ───
+	// pickingCopy is true while the copy-target picker overlay is open;
+	// copyPicker is the list and copyTargets the snapshot it indexes into
+	// (taken at open time so streaming cannot drift a selection).
+	pickingCopy bool
+	copyPicker  list.Model
+	copyTargets []copyTarget
 
 	// Plan review state
 	planReviewActive   bool
@@ -421,7 +429,7 @@ func (m *Model) confirmCancelAgent() {
 }
 
 func (m Model) inputActive() bool {
-	return (m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt || m.sshHostKeyPrompt) && !m.pickingModel && !m.managingModels && !m.pickingTheme && !m.showingSetting && !m.showingHelp && !m.showingTranscript && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending && !m.planReviewActive && !m.askUserActive
+	return (m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt || m.sshHostKeyPrompt) && !m.pickingModel && !m.managingModels && !m.pickingTheme && !m.pickingCopy && !m.showingSetting && !m.showingHelp && !m.showingTranscript && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending && !m.planReviewActive && !m.askUserActive
 }
 
 // ModelOption configures a Model before the BubbleTea program starts.

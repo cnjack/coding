@@ -104,6 +104,8 @@ var rateLimitPatterns = []*regexp.Regexp{
 // several return 400 or 403 with a billing message rather than 402 — so the text
 // has to be matched, not just the status.
 var quotaPatterns = []*regexp.Regexp{
+	// Alibaba uses 403 when the account has not enabled the selected model.
+	regexp.MustCompile(`(?i)AccessDenied\.Unpurchased`),
 	regexp.MustCompile(`(?i)payment.required`),
 	regexp.MustCompile(`(?i)insufficient.(balance|credit|quota|funds)`),
 	regexp.MustCompile(`(?i)(quota|credit|balance).*(exhaust|depleted|run out|used up)`),
@@ -679,6 +681,9 @@ func FriendlyAPIError(err error, provider, model string) string {
 			"Nothing was lost — wait a moment and send the message again, or switch models with /model.", where)
 
 	case ErrCategoryQuota:
+		if strings.Contains(strings.ToLower(err.Error()), "accessdenied.unpurchased") {
+			return fmt.Sprintf("Model access is not enabled%s. Open the provider console to purchase or enable access to this model, then retry. Or switch to another configured model with /model.", where)
+		}
 		msg := fmt.Sprintf("Out of quota%s — the account has no credit left for this model, "+
 			"so I stopped without running anything.", where)
 		// Prefer a URL the provider itself put in the error over our table: it is

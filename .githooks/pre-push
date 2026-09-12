@@ -11,6 +11,13 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
+# A linked worktree's hook inherits GIT_DIR. Tests that create disposable Git
+# repositories must not reinitialize or change the invoking checkout instead.
+# We are at the root now, so Git can rediscover it without these overrides.
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PREFIX
+
+
 fail() { echo "" >&2; echo "✗ pre-push: $1" >&2; echo "  (bypass with: git push --no-verify)" >&2; exit 1; }
 
 # Git passes every ref update on stdin. CI runs a full lint on pushes to main,

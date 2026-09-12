@@ -1,8 +1,11 @@
 package model
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+
+	openai "github.com/sashabaranov/go-openai"
 )
 
 func TestUnpurchasedModelIsNotARejectedKey(t *testing.T) {
@@ -16,5 +19,16 @@ func TestUnpurchasedModelIsNotARejectedKey(t *testing.T) {
 	}
 	if got := ClassifyError(apiErr(403, "AccessDenied: API key is invalid")); got != ErrCategoryAuth {
 		t.Fatalf("generic 403 category=%v", got)
+	}
+}
+
+func TestUnpurchasedModelStructuredCode(t *testing.T) {
+	err := fmt.Errorf("model stream: %w", &openai.APIError{HTTPStatusCode: 403, Code: "AccessDenied.Unpurchased", Message: "Model service is not activated."})
+	if got := ClassifyError(err); got != ErrCategoryQuota {
+		t.Fatalf("category=%v", got)
+	}
+	got := FriendlyAPIError(err, "alibaba-token-plan-cn", "glm-5.2")
+	if !strings.Contains(got, "enable access") || strings.Contains(got, "key") {
+		t.Fatal(got)
 	}
 }

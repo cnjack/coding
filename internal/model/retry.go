@@ -134,11 +134,25 @@ var quotaPatterns = []*regexp.Regexp{
 }
 
 // ClassifyError determines the category of an API error.
+func unpurchasedModel(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *openai.APIError
+	if asAPIErr(err, &apiErr) && strings.EqualFold(fmt.Sprint(apiErr.Code), "AccessDenied.Unpurchased") {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "accessdenied.unpurchased")
+}
+
 func ClassifyError(err error) APIErrorCategory {
 	if err == nil {
 		return ErrCategoryFatal
 	}
 
+	if unpurchasedModel(err) {
+		return ErrCategoryQuota
+	}
 	msg := err.Error()
 
 	// Check OpenAI SDK typed errors first.
@@ -681,7 +695,7 @@ func FriendlyAPIError(err error, provider, model string) string {
 			"Nothing was lost — wait a moment and send the message again, or switch models with /model.", where)
 
 	case ErrCategoryQuota:
-		if strings.Contains(strings.ToLower(err.Error()), "accessdenied.unpurchased") {
+		if unpurchasedModel(err) {
 			return fmt.Sprintf("Model access is not enabled%s. Open the provider console to purchase or enable access to this model, then retry. Or switch to another configured model with /model.", where)
 		}
 		msg := fmt.Sprintf("Out of quota%s — the account has no credit left for this model, "+
